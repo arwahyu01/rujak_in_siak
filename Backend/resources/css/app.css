@@ -1,0 +1,124 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@100;200;300;400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    html {
+        font-family: 'DM Sans', sans-serif;
+        font-feature-settings: 'kern';
+        -webkit-font-smoothing: antialiased;
+        letter-spacing: -0.2px;
+        scroll-behavior: smooth;
+    }
+
+    body {
+        min-height: 100vh;
+        background-color: #f4f7fe;
+    }
+
+    .dark body {
+        background-color: #0b1437;
+    }
+
+    ::selection {
+        background: #422afb;
+        color: #fff;
+    }
+}
+
+@layer components {
+    .horizon-input {
+        @apply h-12 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm text-navy-700 outline-none transition placeholder:text-gray-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10 dark:border-white/10 dark:bg-navy-800 dark:text-white dark:placeholder:text-gray-500;
+    }
+
+    .horizon-label {
+        @apply mb-2 block text-sm font-medium text-navy-700 dark:text-white;
+    }
+
+    .horizon-select {
+        @apply horizon-input appearance-none pr-8;
+    }
+
+    .horizon-textarea {
+        @apply w-full rounded-xl border border-gray-200 bg-white px-3 py-3 text-sm text-navy-700 outline-none transition placeholder:text-gray-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/10 dark:border-white/10 dark:bg-navy-800 dark:text-white dark:placeholder:text-gray-500;
+    }
+
+    .horizon-table {
+        @apply w-full border-collapse text-left text-sm;
+    }
+
+    .horizon-table thead th {
+        @apply whitespace-nowrap border-b border-gray-200 px-4 py-3 text-xs font-bold uppercase tracking-wide text-gray-600 dark:border-white/10 dark:text-gray-400;
+    }
+
+    .horizon-table tbody td {
+        @apply border-b border-gray-100 px-4 py-4 align-middle text-navy-700 dark:border-white/5 dark:text-white;
+    }
+
+    .horizon-table tbody tr:last-child td {
+        @apply border-b-0;
+    }
+
+    .horizon-table tbody tr {
+        @apply transition hover:bg-lightPrimary/70 dark:hover:bg-white/5;
+    }
+}
+
+*::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+    background: #cbd5e0;
+    border-radius: 8px;
+}
+
+.dark *::-webkit-scrollbar-thumb {
+    background: #24388a;
+}
+
+.apexcharts-tooltip {
+    border: 0 !important;
+    border-radius: 12px !important;
+    box-shadow: 0 10px 30px rgba(11, 20, 55, 0.12) !important;
+}
+
+.apexcharts-tooltip-title {
+    border-bottom: 1px solid #edf2f7 !important;
+    background: #fff !important;
+    font-weight: 700 !important;
+}
+
+.dark .apexcharts-tooltip,
+.dark .apexcharts-tooltip-title {
+    background: #111c44 !important;
+    color: #fff !important;
+}
+
+#nprogress .bar {
+    background: #422afb !important;
+    height: 3px !important;
+}
+
+@keyframes toast-in {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.toast-enter {
+    animation: toast-in 180ms ease-out;
+}
