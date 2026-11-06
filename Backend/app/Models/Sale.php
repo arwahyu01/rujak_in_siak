@@ -12,14 +12,21 @@ class Sale extends Model
     use HasUuid;
 
     public const LIFECYCLE_FINALIZED = 'finalized';
+
     public const LIFECYCLE_VOIDED = 'voided';
 
     public const PAYMENT_UNPAID = 'unpaid';
+
     public const PAYMENT_PARTIALLY_PAID = 'partially_paid';
+
     public const PAYMENT_AWAITING_VERIFICATION = 'awaiting_verification';
+
     public const PAYMENT_PAID = 'paid';
+
     public const PAYMENT_PARTIALLY_REFUNDED = 'partially_refunded';
+
     public const PAYMENT_REFUNDED = 'refunded';
+
     public const PAYMENT_CANCELLED = 'cancelled';
 
     protected $fillable = [
@@ -28,6 +35,10 @@ class Sale extends Model
         'shift_id',
         'user_id',
         'device_id',
+        'source_order_id',
+        'source_order_version',
+        'origin',
+        'pricing_snapshot',
         'receipt_number',
         'order_type',
         'table_number',
@@ -47,6 +58,7 @@ class Sale extends Model
         'notes',
         'source_order_uuid',
         'transacted_at',
+        'client_created_at',
         'voided_at',
         'voided_by',
         'void_reason',
@@ -66,7 +78,9 @@ class Sale extends Model
             'awaiting_verification_amount' => 'integer',
             'outstanding_amount' => 'integer',
             'refunded_amount' => 'integer',
+            'pricing_snapshot' => 'array',
             'transacted_at' => 'datetime',
+            'client_created_at' => 'datetime',
             'voided_at' => 'datetime',
         ];
     }
@@ -94,6 +108,11 @@ class Sale extends Model
     public function device(): BelongsTo
     {
         return $this->belongsTo(Device::class);
+    }
+
+    public function sourceOrder(): BelongsTo
+    {
+        return $this->belongsTo(Order::class, 'source_order_id');
     }
 
     public function items(): HasMany

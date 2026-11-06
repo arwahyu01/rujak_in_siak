@@ -21,7 +21,12 @@ class SyncEvent extends Model
         'schema_version',
         'status',
         'payload',
+        'payload_hash',
+        'source',
+        'lease_uuid',
         'error_code',
+        'result',
+        'retryable',
         'occurred_at',
         'processed_at',
     ];
@@ -34,6 +39,8 @@ class SyncEvent extends Model
             'sequence' => 'integer',
             'schema_version' => 'integer',
             'payload' => 'array',
+            'result' => 'array',
+            'retryable' => 'boolean',
             'occurred_at' => 'datetime',
             'processed_at' => 'datetime',
         ];

@@ -19,14 +19,17 @@ class VerifyPayment
         private readonly SalePaymentAggregator $aggregator,
         private readonly AuditLogger $audit,
         private readonly SyncRecorder $sync,
-    ) {
-    }
+    ) {}
 
     public function handle(SalePayment $payment, array $data, User $actor): SalePayment
     {
         return DB::transaction(function () use ($payment, $data, $actor) {
             $payment = SalePayment::query()->with('sale')->lockForUpdate()->findOrFail($payment->id);
             $sale = Sale::query()->lockForUpdate()->findOrFail($payment->sale_id);
+
+            if ((int) $sale->business_id !== (int) $actor->business_id) {
+                throw new AuthorizationException('Pembayaran tidak ditemukan pada bisnis ini.');
+            }
 
             $this->authorize($payment, $actor);
 
@@ -88,7 +91,7 @@ class VerifyPayment
                 'notes' => $data['verification_note'] ?? null,
             ]);
 
-            $sale = $this->aggregator->recalculate($sale, );
+            $sale = $this->aggregator->recalculate($sale);
 
             $this->audit->record(
                 $isCorrection ? 'payment.amount_corrected' : 'payment.verified',

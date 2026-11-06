@@ -12,6 +12,9 @@ class Refund extends Model
 
     protected $fillable = [
         'sale_id',
+        'uuid',
+        'idempotency_key',
+        'method',
         'amount',
         'reason',
         'created_by',

@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\SalePayment;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
@@ -51,8 +52,8 @@ class HandleInertiaRequests extends Middleware
                 'error' => fn () => $request->session()->get('error'),
             ],
             'pendingPaymentsCount' => fn () => $user && $user->hasPermission('payments.view_pending')
-                ? \App\Models\SalePayment::query()
-                    ->where('status', \App\Models\SalePayment::STATUS_AWAITING_VERIFICATION)
+                ? SalePayment::query()
+                    ->where('status', SalePayment::STATUS_AWAITING_VERIFICATION)
                     ->whereHas('sale', fn ($query) => $query->where('business_id', $user->business_id))
                     ->count()
                 : 0,

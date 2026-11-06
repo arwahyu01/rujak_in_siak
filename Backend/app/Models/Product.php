@@ -24,6 +24,7 @@ class Product extends Model
         'unit',
         'price',
         'production_cost',
+        'tax_rate_basis_points',
         'is_active',
         'is_available',
         'image_path',
@@ -34,6 +35,7 @@ class Product extends Model
         return [
             'price' => 'integer',
             'production_cost' => 'integer',
+            'tax_rate_basis_points' => 'integer',
             'is_active' => 'boolean',
             'is_available' => 'boolean',
         ];

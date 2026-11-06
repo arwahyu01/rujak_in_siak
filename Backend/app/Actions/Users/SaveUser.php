@@ -2,22 +2,28 @@
 
 namespace App\Actions\Users;
 
+use App\Models\AuthorizationLease;
 use App\Models\Outlet;
 use App\Models\Role;
 use App\Models\User;
+use App\Models\UserSession;
 use App\Services\AuditLogger;
+use App\Services\SyncRecorder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class SaveUser
 {
-    public function __construct(private readonly AuditLogger $audit)
-    {
-    }
+    public function __construct(
+        private readonly AuditLogger $audit,
+        private readonly SyncRecorder $sync,
+    ) {}
 
     public function handle(array $data, User $actor, ?User $user = null): User
     {
         return DB::transaction(function () use ($data, $actor, $user) {
+            $created = $user === null;
             $role = Role::query()->findOrFail($data['role_id']);
 
             if ($user && $user->is($actor) && ! (bool) ($data['is_active'] ?? true)) {
@@ -70,6 +76,7 @@ class SaveUser
                 $user->update(['password' => $data['password']]);
             }
 
+            $roleChanged = ! $created && ! $user->roles()->whereKey($role->id)->exists();
             $user->roles()->sync([$role->id]);
 
             $this->audit->record(
@@ -83,7 +90,58 @@ class SaveUser
                 $actor->business_id,
             );
 
+            $securityChanged = $roleChanged
+                || ! empty($data['password'])
+                || $user->wasChanged(['email', 'username', 'is_active', 'outlet_id']);
+
+            if (! $created && $securityChanged) {
+                $this->invalidateAuthorization($user);
+            }
+
             return $user->refresh()->load('roles');
         });
+    }
+
+    private function invalidateAuthorization(User $user): void
+    {
+        $user->bumpAuthVersion();
+
+        AuthorizationLease::query()
+            ->where('user_id', $user->id)
+            ->whereNull('revoked_at')
+            ->update(['revoked_at' => now(), 'revoked_reason' => 'user_identity_changed']);
+
+        if (! $user->is_active) {
+            $tokenIds = UserSession::query()
+                ->where('user_id', $user->id)
+                ->whereNotNull('personal_access_token_id')
+                ->pluck('personal_access_token_id')
+                ->unique()
+                ->all();
+
+            UserSession::query()
+                ->where('user_id', $user->id)
+                ->whereNull('revoked_at')
+                ->update(['revoked_at' => now(), 'revoked_reason' => 'account_deactivated']);
+
+            if ($tokenIds !== []) {
+                PersonalAccessToken::query()->whereIn('id', $tokenIds)->delete();
+            }
+        }
+
+        $this->sync->record(
+            'permission.changed',
+            'user',
+            $user->uuid,
+            [
+                'user_uuid' => $user->uuid,
+                'roles' => $user->roleSlugs(),
+                'permissions' => $user->permissionSlugs(),
+                'authentication_version' => (int) $user->auth_version,
+                'is_active' => (bool) $user->is_active,
+                'changed_at' => now()->toIso8601String(),
+            ],
+            $user->business_id,
+        );
     }
 }

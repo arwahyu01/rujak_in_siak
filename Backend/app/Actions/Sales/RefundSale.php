@@ -6,6 +6,7 @@ use App\Models\Refund;
 use App\Models\Sale;
 use App\Models\User;
 use App\Services\AuditLogger;
+use App\Services\IdempotencyService;
 use App\Services\SalePaymentAggregator;
 use App\Services\SyncRecorder;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -16,15 +17,24 @@ class RefundSale
 {
     public function __construct(
         private readonly SalePaymentAggregator $aggregator,
+        private readonly IdempotencyService $idempotency,
         private readonly AuditLogger $audit,
         private readonly SyncRecorder $sync,
-    ) {
-    }
+    ) {}
 
-    public function handle(Sale $sale, array $data, User $actor): Sale
+    public function handle(Sale $sale, array $data, User $actor, ?string $idempotencyKey = null): Sale
     {
-        return DB::transaction(function () use ($sale, $data, $actor) {
+        return DB::transaction(function () use ($sale, $data, $actor, $idempotencyKey) {
             $sale = Sale::query()->lockForUpdate()->findOrFail($sale->id);
+
+            if ((int) $sale->business_id !== (int) $actor->business_id) {
+                throw ValidationException::withMessages(['sale' => 'Transaksi tidak ditemukan.']);
+            }
+
+            if ($idempotencyKey
+                && $this->idempotency->existing($sale->business_id, 'sales.refund', $idempotencyKey, $data)) {
+                return $sale->refresh()->load(['cashier', 'items', 'payments', 'refunds.createdBy']);
+            }
 
             if (! $actor->hasPermission('sales.refund')) {
                 throw new AuthorizationException('Anda tidak memiliki hak untuk melakukan refund.');
@@ -56,6 +66,8 @@ class RefundSale
 
             $refund = Refund::create([
                 'sale_id' => $sale->id,
+                'idempotency_key' => $idempotencyKey,
+                'method' => $data['method'] ?? 'cash',
                 'amount' => $amount,
                 'reason' => $data['reason'],
                 'created_by' => $actor->id,
@@ -83,6 +95,7 @@ class RefundSale
                     'sale_uuid' => $sale->uuid,
                     'refund_uuid' => $refund->uuid,
                     'amount' => $amount,
+                    'method' => $refund->method,
                     'reason' => $data['reason'],
                     'payment_status' => $sale->payment_status,
                     'refunded_amount' => $sale->refunded_amount,
@@ -91,6 +104,21 @@ class RefundSale
                 $sale->outlet_id,
                 $sale->device_id,
             );
+
+            if ($idempotencyKey) {
+                $this->idempotency->store(
+                    $sale->business_id,
+                    'sales.refund',
+                    $idempotencyKey,
+                    $data,
+                    200,
+                    ['sale_uuid' => $sale->uuid, 'refund_uuid' => $refund->uuid],
+                    $actor->id,
+                    $sale->device_id,
+                    'refund',
+                    $refund->uuid,
+                );
+            }
 
             return $sale->refresh()->load(['cashier', 'items', 'payments', 'refunds.createdBy']);
         });

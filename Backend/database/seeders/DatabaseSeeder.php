@@ -13,6 +13,7 @@ class DatabaseSeeder extends Seeder
             RoleSeeder::class,
             BusinessSeeder::class,
             OwnerUserSeeder::class,
+            ProductCatalogSeeder::class,
         ]);
     }
 }

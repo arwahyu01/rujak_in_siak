@@ -34,6 +34,7 @@ class ProductRequest extends FormRequest
             'unit' => ['nullable', 'string', 'max:30'],
             'price' => ['required', 'integer', 'min:0', 'max:999999999999'],
             'production_cost' => ['nullable', 'integer', 'min:0', 'max:999999999999'],
+            'tax_rate_basis_points' => ['nullable', 'integer', 'min:0', 'max:10000'],
             'is_active' => ['nullable', 'boolean'],
             'is_available' => ['nullable', 'boolean'],
             'image' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],

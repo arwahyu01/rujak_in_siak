@@ -4,22 +4,24 @@ namespace App\Actions\Catalog;
 
 use App\Models\Product;
 use App\Services\AuditLogger;
+use App\Services\SyncRecorder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class SaveProduct
 {
-    public function __construct(private readonly AuditLogger $audit)
-    {
-    }
+    public function __construct(
+        private readonly AuditLogger $audit,
+        private readonly SyncRecorder $sync,
+    ) {}
 
     public function handle(array $data, int $businessId, ?Product $product = null): Product
     {
         return DB::transaction(function () use ($data, $businessId, $product) {
             $old = $product ? $product->only([
                 'category_id', 'sku', 'barcode', 'name', 'description', 'unit', 'price',
-                'production_cost', 'is_active', 'is_available',
+                'production_cost', 'tax_rate_basis_points', 'is_active', 'is_available',
             ]) : [];
 
             $payload = [
@@ -32,6 +34,9 @@ class SaveProduct
                 'unit' => $data['unit'] ?? 'porsi',
                 'price' => (int) $data['price'],
                 'production_cost' => isset($data['production_cost']) && $data['production_cost'] !== '' ? (int) $data['production_cost'] : null,
+                'tax_rate_basis_points' => isset($data['tax_rate_basis_points']) && $data['tax_rate_basis_points'] !== ''
+                    ? (int) $data['tax_rate_basis_points']
+                    : null,
                 'is_active' => (bool) ($data['is_active'] ?? true),
                 'is_available' => (bool) ($data['is_available'] ?? true),
             ];
@@ -76,7 +81,7 @@ class SaveProduct
                 ]);
             }
 
-            $fresh = $product->refresh()->load(['variants', 'addons']);
+            $fresh = $product->refresh()->load(['category', 'variants', 'addons']);
             $this->audit->record(
                 $product->wasRecentlyCreated ? 'product.created' : 'product.updated',
                 'products',
@@ -85,12 +90,50 @@ class SaveProduct
                 $old,
                 $fresh->only([
                     'category_id', 'sku', 'barcode', 'name', 'description', 'unit', 'price',
-                    'production_cost', 'is_active', 'is_available',
+                    'production_cost', 'tax_rate_basis_points', 'is_active', 'is_available',
                 ]) + [
                     'variants' => $fresh->variants->map->only(['name', 'sku', 'price_delta', 'is_active'])->all(),
                     'addons' => $fresh->addons->map->only(['name', 'price', 'is_active'])->all(),
                 ],
                 businessId: $businessId,
+            );
+
+            $this->sync->record(
+                $product->wasRecentlyCreated ? 'product.created' : 'product.updated',
+                'product',
+                $fresh->uuid,
+                [
+                    'uuid' => $fresh->uuid,
+                    'sku' => $fresh->sku,
+                    'barcode' => $fresh->barcode,
+                    'name' => $fresh->name,
+                    'description' => $fresh->description,
+                    'unit' => $fresh->unit,
+                    'price' => (int) $fresh->price,
+                    'tax_rate_basis_points' => $fresh->tax_rate_basis_points,
+                    'is_active' => (bool) $fresh->is_active,
+                    'is_available' => (bool) $fresh->is_available,
+                    'image_url' => $fresh->image_url,
+                    'category' => $fresh->category ? [
+                        'uuid' => $fresh->category->uuid,
+                        'name' => $fresh->category->name,
+                    ] : null,
+                    'variants' => $fresh->variants->map(fn ($variant) => [
+                        'uuid' => $variant->uuid,
+                        'name' => $variant->name,
+                        'sku' => $variant->sku,
+                        'price_delta' => (int) $variant->price_delta,
+                        'is_active' => (bool) $variant->is_active,
+                    ])->all(),
+                    'addons' => $fresh->addons->map(fn ($addon) => [
+                        'uuid' => $addon->uuid,
+                        'name' => $addon->name,
+                        'price' => (int) $addon->price,
+                        'is_active' => (bool) $addon->is_active,
+                    ])->all(),
+                    'updated_at' => $fresh->updated_at?->toIso8601String(),
+                ],
+                $businessId,
             );
 
             return $fresh;

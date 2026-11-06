@@ -6,14 +6,18 @@ use App\Models\Concerns\HasUuid;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Shift extends Model
 {
     use HasUuid;
 
     public const STATUS_OPEN = 'open';
+
     public const STATUS_CLOSED_PENDING_SYNC = 'closed_pending_sync';
+
     public const STATUS_CLOSED_CONFIRMED = 'closed_confirmed';
+
     public const STATUS_CLOSED_SYNC_EXCEPTION = 'closed_sync_exception';
 
     protected $fillable = [
@@ -35,6 +39,7 @@ class Shift extends Model
         'awaiting_verification_amount',
         'local_transaction_count',
         'pending_sync_count',
+        'local_event_sequence',
         'opening_notes',
         'closing_notes',
         'opened_at',
@@ -59,6 +64,7 @@ class Shift extends Model
             'awaiting_verification_amount' => 'integer',
             'local_transaction_count' => 'integer',
             'pending_sync_count' => 'integer',
+            'local_event_sequence' => 'integer',
             'opened_at' => 'datetime',
             'closed_at' => 'datetime',
             'approved_at' => 'datetime',
@@ -98,5 +104,15 @@ class Shift extends Model
     public function cashMovements(): HasMany
     {
         return $this->hasMany(ShiftCashMovement::class);
+    }
+
+    public function closingSnapshot(): HasOne
+    {
+        return $this->hasOne(ShiftClosingSnapshot::class);
+    }
+
+    public function orders(): HasMany
+    {
+        return $this->hasMany(Order::class);
     }
 }

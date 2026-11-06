@@ -4,14 +4,16 @@ namespace App\Actions\Catalog;
 
 use App\Models\Category;
 use App\Services\AuditLogger;
+use App\Services\SyncRecorder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 class DeleteCategory
 {
-    public function __construct(private readonly AuditLogger $audit)
-    {
-    }
+    public function __construct(
+        private readonly AuditLogger $audit,
+        private readonly SyncRecorder $sync,
+    ) {}
 
     public function handle(Category $category): void
     {
@@ -31,6 +33,19 @@ class DeleteCategory
                 ['is_active' => true],
                 ['is_active' => false],
                 businessId: $category->business_id,
+            );
+
+            $this->sync->record(
+                'category.deactivated',
+                'category',
+                $category->uuid,
+                [
+                    'uuid' => $category->uuid,
+                    'name' => $category->name,
+                    'is_active' => false,
+                    'updated_at' => $category->updated_at?->toIso8601String(),
+                ],
+                $category->business_id,
             );
         });
     }

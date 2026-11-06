@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class PaymentVerificationLog extends Model
 {
+    public $timestamps = false;
+
     protected $fillable = [
         'sale_payment_id',
         'action',
@@ -23,6 +25,7 @@ class PaymentVerificationLog extends Model
         return [
             'recorded_amount' => 'integer',
             'verified_amount' => 'integer',
+            'created_at' => 'datetime',
         ];
     }
 

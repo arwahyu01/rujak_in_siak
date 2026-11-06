@@ -9,10 +9,11 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Collection;
+use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable
 {
-    use HasUuid, Notifiable;
+    use HasApiTokens, HasUuid, Notifiable;
 
     protected $fillable = [
         'name',
@@ -27,6 +28,7 @@ class User extends Authenticatable
 
     protected $hidden = [
         'password',
+        'pin_hash',
         'remember_token',
     ];
 
@@ -38,8 +40,12 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'last_login_at' => 'datetime',
+            'pin_updated_at' => 'datetime',
+            'locked_until' => 'datetime',
             'is_active' => 'boolean',
             'password' => 'hashed',
+            'auth_version' => 'integer',
+            'failed_login_attempts' => 'integer',
         ];
     }
 
@@ -66,6 +72,21 @@ class User extends Authenticatable
     public function shifts(): HasMany
     {
         return $this->hasMany(Shift::class, 'user_id');
+    }
+
+    public function orders(): HasMany
+    {
+        return $this->hasMany(Order::class, 'user_id');
+    }
+
+    public function sessions(): HasMany
+    {
+        return $this->hasMany(UserSession::class);
+    }
+
+    public function authorizationLeases(): HasMany
+    {
+        return $this->hasMany(AuthorizationLease::class);
     }
 
     public function permissionSlugs(): array
@@ -114,5 +135,24 @@ class User extends Authenticatable
     public function isOwner(): bool
     {
         return $this->hasRole('owner');
+    }
+
+    public function roleSlugs(): array
+    {
+        if (! $this->relationLoaded('roles')) {
+            $this->load('roles');
+        }
+
+        return $this->roles->pluck('slug')->values()->all();
+    }
+
+    /**
+     * Any change to identity, role, permission, password, PIN, or active state
+     * invalidates previously issued offline leases.
+     */
+    public function bumpAuthVersion(): void
+    {
+        $this->forceFill(['auth_version' => ((int) $this->auth_version) + 1])->save();
+        $this->permissionSlugCache = null;
     }
 }

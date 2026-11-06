@@ -22,7 +22,8 @@ class SalePaymentAggregator
 
         $refunded = (int) $sale->refunds()->sum('amount');
         $netConfirmed = max($confirmed - $refunded, 0);
-        $outstanding = max((int) $sale->total - $netConfirmed, 0);
+        // Refunds return money already received; they never recreate customer debt.
+        $outstanding = max((int) $sale->total - $confirmed, 0);
 
         if ($sale->lifecycle_status === Sale::LIFECYCLE_VOIDED) {
             $status = Sale::PAYMENT_CANCELLED;

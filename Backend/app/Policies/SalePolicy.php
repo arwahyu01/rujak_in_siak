@@ -12,6 +12,11 @@ class SalePolicy
         return $user->hasPermission('sales.view');
     }
 
+    public function create(User $user): bool
+    {
+        return $user->hasPermission('sales.checkout');
+    }
+
     public function view(User $user, Sale $sale): bool
     {
         return $user->hasPermission('sales.view') && $user->business_id === $sale->business_id;

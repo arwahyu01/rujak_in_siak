@@ -17,12 +17,14 @@ class Category extends Model
         'slug',
         'description',
         'sort_order',
+        'tax_rate_basis_points',
         'is_active',
     ];
 
     protected function casts(): array
     {
         return [
+            'tax_rate_basis_points' => 'integer',
             'is_active' => 'boolean',
         ];
     }

@@ -6,6 +6,7 @@ use App\Models\Sale;
 use App\Models\SalePayment;
 use App\Models\User;
 use App\Services\AuditLogger;
+use App\Services\IdempotencyService;
 use App\Services\SalePaymentAggregator;
 use App\Services\SyncRecorder;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -16,15 +17,24 @@ class VoidSale
 {
     public function __construct(
         private readonly SalePaymentAggregator $aggregator,
+        private readonly IdempotencyService $idempotency,
         private readonly AuditLogger $audit,
         private readonly SyncRecorder $sync,
-    ) {
-    }
+    ) {}
 
-    public function handle(Sale $sale, array $data, User $actor): Sale
+    public function handle(Sale $sale, array $data, User $actor, ?string $idempotencyKey = null): Sale
     {
-        return DB::transaction(function () use ($sale, $data, $actor) {
+        return DB::transaction(function () use ($sale, $data, $actor, $idempotencyKey) {
             $sale = Sale::query()->lockForUpdate()->findOrFail($sale->id);
+
+            if ((int) $sale->business_id !== (int) $actor->business_id) {
+                throw ValidationException::withMessages(['sale' => 'Transaksi tidak ditemukan.']);
+            }
+
+            if ($idempotencyKey
+                && $this->idempotency->existing($sale->business_id, 'sales.void', $idempotencyKey, $data)) {
+                return $sale->refresh()->load(['cashier', 'voidedBy', 'items', 'payments']);
+            }
 
             if (! $actor->hasPermission('sales.void')) {
                 throw new AuthorizationException('Anda tidak memiliki hak untuk melakukan void.');
@@ -93,6 +103,21 @@ class VoidSale
                 $sale->outlet_id,
                 $sale->device_id,
             );
+
+            if ($idempotencyKey) {
+                $this->idempotency->store(
+                    $sale->business_id,
+                    'sales.void',
+                    $idempotencyKey,
+                    $data,
+                    200,
+                    ['sale_uuid' => $sale->uuid],
+                    $actor->id,
+                    $sale->device_id,
+                    'sale',
+                    $sale->uuid,
+                );
+            }
 
             return $sale->refresh()->load(['cashier', 'voidedBy', 'items', 'payments']);
         });

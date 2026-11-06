@@ -46,13 +46,22 @@ class RoleSeeder extends Seeder
                 'categories.manage',
                 'products.view',
                 'products.manage',
+                'orders.view',
+                'orders.manage',
+                'orders.override_table_conflict',
                 'sales.view',
+                'sales.checkout',
                 'sales.void',
                 'sales.refund',
+                'payments.record',
                 'payments.view_pending',
                 'payments.verify',
                 'payments.reject',
                 'shifts.view',
+                'shifts.manage',
+                'shifts.reconcile',
+                'devices.view',
+                'devices.manage',
                 'reports.view',
                 'reports.export',
                 'users.view',
@@ -65,15 +74,32 @@ class RoleSeeder extends Seeder
             ->whereIn('slug', [
                 'admin.access',
                 'dashboard.view',
+                'orders.view',
+                'orders.override_table_conflict',
                 'sales.view',
                 'payments.view_pending',
                 'payments.verify',
                 'payments.reject',
                 'payments.correct_amount',
                 'shifts.view',
+                'shifts.reconcile',
+                'devices.view',
                 'reports.view',
                 'audit.view',
                 'sync.view',
+            ])
+            ->pluck('id');
+
+        $kasir = Permission::query()
+            ->whereIn('slug', [
+                'products.view',
+                'orders.view',
+                'orders.manage',
+                'sales.view',
+                'sales.checkout',
+                'payments.record',
+                'shifts.view',
+                'shifts.manage',
             ])
             ->pluck('id');
 
@@ -85,6 +111,6 @@ class RoleSeeder extends Seeder
         $owner->permissions()->sync($all);
         $adminRole->permissions()->sync($admin);
         $supervisorRole->permissions()->sync($supervisor);
-        $kasirRole->permissions()->sync([]);
+        $kasirRole->permissions()->sync($kasir);
     }
 }
