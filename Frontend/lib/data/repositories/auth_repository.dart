@@ -40,7 +40,6 @@ class AuthRepository {
   Future<({AppDevice device, OfflineLease? lease})> registerDevice({
     required String uuid,
     required String name,
-    required String terminalCode,
     required String appVersion,
     required String fingerprint,
   }) async {
@@ -49,7 +48,6 @@ class AuthRepository {
       body: {
         'uuid': uuid,
         'name': name.trim(),
-        'terminal_code': terminalCode.trim().toUpperCase(),
         'platform': 'android',
         'app_version': appVersion,
         'device_fingerprint': fingerprint,

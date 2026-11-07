@@ -60,7 +60,6 @@ class SessionController extends AsyncNotifier<AuthSession?> {
 
   Future<AuthSession> completeDeviceSetup({
     required String name,
-    required String terminalCode,
   }) async {
     final current = state.value;
     if (current == null) {
@@ -75,7 +74,6 @@ class SessionController extends AsyncNotifier<AuthSession?> {
     final registered = await repository.registerDevice(
       uuid: uuid,
       name: name,
-      terminalCode: terminalCode,
       appVersion: '1.0.0',
       fingerprint: fingerprint,
     );
@@ -122,7 +120,10 @@ class SessionController extends AsyncNotifier<AuthSession?> {
 
   Future<void> _persist(AuthSession session) async {
     await _store.saveSession(session.toJson());
-    _api.configure(token: session.token, deviceUuid: session.device?.uuid);
+    // The device header must survive sessions where the server does not echo
+    // the device object yet (e.g. right after login before registration).
+    final deviceUuid = session.device?.uuid ?? await _store.deviceUuid();
+    _api.configure(token: session.token, deviceUuid: deviceUuid);
     state = AsyncData(session);
   }
 

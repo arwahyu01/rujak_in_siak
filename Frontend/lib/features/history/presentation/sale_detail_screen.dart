@@ -154,30 +154,15 @@ class _SaleDetailScreenState extends ConsumerState<SaleDetailScreen> {
     required String hint,
     required String confirmLabel,
   }) {
-    final controller = TextEditingController();
     return showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLines: 3,
-          decoration: InputDecoration(labelText: label, hintText: hint),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Batal'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
-            onPressed: () => Navigator.of(context).pop(controller.text),
-            child: Text(confirmLabel),
-          ),
-        ],
+      builder: (_) => _TextPromptDialog(
+        title: title,
+        label: label,
+        hint: hint,
+        confirmLabel: confirmLabel,
       ),
-    ).whenComplete(controller.dispose);
+    );
   }
 
   @override
@@ -528,6 +513,60 @@ class _SaleDetailScreenState extends ConsumerState<SaleDetailScreen> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _TextPromptDialog extends StatefulWidget {
+  const _TextPromptDialog({
+    required this.title,
+    required this.label,
+    required this.hint,
+    required this.confirmLabel,
+  });
+
+  final String title;
+  final String label;
+  final String hint;
+  final String confirmLabel;
+
+  @override
+  State<_TextPromptDialog> createState() => _TextPromptDialogState();
+}
+
+class _TextPromptDialogState extends State<_TextPromptDialog> {
+  final TextEditingController _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        maxLines: 3,
+        decoration: InputDecoration(
+          labelText: widget.label,
+          hintText: widget.hint,
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Batal'),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+          onPressed: () => Navigator.of(context).pop(_controller.text),
+          child: Text(widget.confirmLabel),
+        ),
+      ],
     );
   }
 }

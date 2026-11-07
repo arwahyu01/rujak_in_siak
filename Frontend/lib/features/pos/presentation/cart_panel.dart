@@ -26,7 +26,16 @@ class CartPanel extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final cart = ref.watch(cartProvider);
-    final pricing = cart.calculate(config);
+    PricingResult? pricing;
+    Object? pricingError;
+    if (!cart.isEmpty) {
+      try {
+        pricing = cart.calculate(config);
+      } catch (error) {
+        // Never let invalid line data escape a widget build.
+        pricingError = error;
+      }
+    }
 
     return Container(
       decoration: BoxDecoration(
@@ -46,16 +55,28 @@ class CartPanel extends ConsumerWidget {
             ),
             child: Row(
               children: [
-                Text('Pesanan', style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(width: AppSpacing.sm),
-                if (cart.itemCount > 0)
-                  StatusChip(label: '${cart.itemCount} item', compact: true),
-                const Spacer(),
+                Expanded(
+                  child: Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          'Pesanan',
+                          style: Theme.of(context).textTheme.titleMedium,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      if (cart.itemCount > 0)
+                        StatusChip(
+                          label: '${cart.itemCount} item',
+                          compact: true,
+                        ),
+                    ],
+                  ),
+                ),
                 if (!cart.isEmpty)
                   TextButton.icon(
-                    onPressed: () {
-                      ref.read(cartProvider.notifier).clear();
-                    },
+                    onPressed: () => _confirmClear(context, ref),
                     icon: const Icon(Icons.delete_sweep_outlined, size: 18),
                     label: const Text('Kosongkan'),
                   ),
@@ -71,73 +92,106 @@ class CartPanel extends ConsumerWidget {
               ),
             )
           else ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-              child: _OrderTypeSelector(cart: cart),
-            ),
-            if (cart.orderType == 'dine_in')
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.lg,
-                  AppSpacing.sm,
-                  AppSpacing.lg,
-                  0,
-                ),
-                child: TextFormField(
-                  initialValue: cart.tableNumber,
-                  textInputAction: TextInputAction.done,
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    labelText: 'Nomor meja',
-                    prefixIcon: Icon(Icons.table_restaurant_outlined),
-                  ),
-                  onChanged: (value) =>
-                      ref.read(cartProvider.notifier).setTableNumber(value),
-                ),
-              ),
-            const SizedBox(height: AppSpacing.sm),
             Expanded(
-              child: ListView.separated(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.lg,
-                  vertical: AppSpacing.xs,
-                ),
-                itemCount: cart.lines.length,
-                separatorBuilder: (_, _) => const Divider(height: 16),
-                itemBuilder: (context, index) {
-                  final line = cart.lines[index];
-                  return _CartLineTile(
-                    line: line,
-                    onIncrement: () =>
-                        ref.read(cartProvider.notifier).increment(line.id),
-                    onDecrement: () =>
-                        ref.read(cartProvider.notifier).decrement(line.id),
-                    onRemove: () =>
-                        ref.read(cartProvider.notifier).removeLine(line.id),
-                    onEdit: () => _editLine(context, ref, line),
-                  );
-                },
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.lg,
+                    ),
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: _OrderTypeSelector(cart: cart),
+                    ),
+                  ),
+                  if (cart.orderType == 'dine_in')
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        AppSpacing.lg,
+                        AppSpacing.sm,
+                        AppSpacing.lg,
+                        0,
+                      ),
+                      child: TextFormField(
+                        initialValue: cart.tableNumber,
+                        textInputAction: TextInputAction.done,
+                        decoration: const InputDecoration(
+                          isDense: true,
+                          labelText: 'Nomor meja',
+                          prefixIcon: Icon(Icons.table_restaurant_outlined),
+                        ),
+                        onChanged: (value) => ref
+                            .read(cartProvider.notifier)
+                            .setTableNumber(value),
+                      ),
+                    ),
+                  const SizedBox(height: AppSpacing.sm),
+                  for (var index = 0; index < cart.lines.length; index++) ...[
+                    if (index > 0) const Divider(height: 16),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.lg,
+                        vertical: AppSpacing.xs,
+                      ),
+                      child: _CartLineTile(
+                        line: cart.lines[index],
+                        onIncrement: () => ref
+                            .read(cartProvider.notifier)
+                            .increment(cart.lines[index].id),
+                        onDecrement: () => ref
+                            .read(cartProvider.notifier)
+                            .decrement(cart.lines[index].id),
+                        onRemove: () => _removeLineWithUndo(
+                          context,
+                          ref,
+                          cart.lines[index],
+                          index,
+                        ),
+                        onEdit: () =>
+                            _editLine(context, ref, cart.lines[index]),
+                      ),
+                    ),
+                  ],
+                  if (pricingError != null)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        AppSpacing.lg,
+                        AppSpacing.md,
+                        AppSpacing.lg,
+                        AppSpacing.sm,
+                      ),
+                      child: InfoBanner(
+                        message:
+                            'Perhitungan keranjang tidak valid. Periksa diskon '
+                            'dan jumlah item sebelum melanjutkan.',
+                        tone: StatusTone.danger,
+                        icon: Icons.error_outline_rounded,
+                      ),
+                    )
+                  else if (pricing != null)
+                    _Totals(
+                      pricing: pricing,
+                      cart: cart,
+                      onDiscount: () =>
+                          _editTransactionDiscount(context, ref, cart),
+                    ),
+                ],
               ),
             ),
-            if (pricing != null)
-              _Totals(
-                pricing: pricing,
-                cart: cart,
-                onDiscount: () => _editTransactionDiscount(context, ref, cart),
-              ),
             Padding(
               padding: const EdgeInsets.all(AppSpacing.lg),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   OutlinedButton.icon(
-                    onPressed: onHold,
+                    onPressed: pricingError == null ? onHold : null,
                     icon: const Icon(Icons.pause_circle_outline_rounded),
                     label: const Text('Tahan pesanan'),
                   ),
                   const SizedBox(height: AppSpacing.sm),
                   FilledButton(
-                    onPressed: onCheckout,
+                    onPressed: pricing == null ? null : onCheckout,
                     child: Text('Bayar · ${formatRupiah(pricing?.total ?? 0)}'),
                   ),
                 ],
@@ -147,6 +201,55 @@ class CartPanel extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  Future<void> _confirmClear(BuildContext context, WidgetRef ref) async {
+    final notifier = ref.read(cartProvider.notifier);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Kosongkan keranjang?'),
+        content: const Text(
+          'Semua item, diskon, catatan, dan nomor meja pada pesanan ini akan '
+          'dihapus.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            child: const Text('Kosongkan'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    notifier.clear();
+  }
+
+  void _removeLineWithUndo(
+    BuildContext context,
+    WidgetRef ref,
+    CartLine line,
+    int index,
+  ) {
+    final notifier = ref.read(cartProvider.notifier);
+    notifier.removeLine(line.id);
+    final messenger = ScaffoldMessenger.of(context);
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('${line.productName} dihapus.'),
+          action: SnackBarAction(
+            label: 'Urungkan',
+            onPressed: () => notifier.insertLine(index, line),
+          ),
+        ),
+      );
   }
 
   Future<void> _editTransactionDiscount(
@@ -170,76 +273,120 @@ class CartPanel extends ConsumerWidget {
     WidgetRef ref,
     CartLine line,
   ) async {
-    final quantity = TextEditingController(text: '${line.quantity}');
-    final discount = TextEditingController(
-      text: line.itemDiscount == 0 ? '' : '${line.itemDiscount}',
-    );
-    final notes = TextEditingController(text: line.notes ?? '');
-    final result = await showDialog<bool>(
+    final result = await showDialog<_LineEditResult>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(line.productName, maxLines: 2),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: quantity,
-                keyboardType: TextInputType.number,
-                inputFormatters: [
-                  FilteringTextInputFormatter.digitsOnly,
-                  LengthLimitingTextInputFormatter(3),
-                ],
-                decoration: const InputDecoration(labelText: 'Jumlah'),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              TextField(
-                controller: discount,
-                keyboardType: TextInputType.number,
-                inputFormatters: [
-                  FilteringTextInputFormatter.digitsOnly,
-                  LengthLimitingTextInputFormatter(9),
-                ],
-                decoration: const InputDecoration(
-                  labelText: 'Diskon item',
-                  prefixText: 'Rp ',
-                ),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              TextField(
-                controller: notes,
-                maxLength: 140,
-                decoration: const InputDecoration(labelText: 'Catatan'),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Batal'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Simpan'),
-          ),
-        ],
+      builder: (_) => _EditLineDialog(line: line),
+    );
+    if (result == null) return;
+
+    final notifier = ref.read(cartProvider.notifier);
+    if (result.quantity <= 0) {
+      notifier.removeLine(line.id);
+    } else {
+      notifier.setQuantity(line.id, result.quantity);
+    }
+    notifier.setLineDiscount(line.id, result.discount);
+    notifier.setLineNotes(line.id, result.notes);
+  }
+}
+
+class _LineEditResult {
+  const _LineEditResult({
+    required this.quantity,
+    required this.discount,
+    required this.notes,
+  });
+
+  final int quantity;
+  final int discount;
+  final String notes;
+}
+
+class _EditLineDialog extends StatefulWidget {
+  const _EditLineDialog({required this.line});
+
+  final CartLine line;
+
+  @override
+  State<_EditLineDialog> createState() => _EditLineDialogState();
+}
+
+class _EditLineDialogState extends State<_EditLineDialog> {
+  late final TextEditingController _quantity = TextEditingController(
+    text: '${widget.line.quantity}',
+  );
+  late final TextEditingController _discount = TextEditingController(
+    text: widget.line.itemDiscount == 0 ? '' : '${widget.line.itemDiscount}',
+  );
+  late final TextEditingController _notes = TextEditingController(
+    text: widget.line.notes ?? '',
+  );
+
+  @override
+  void dispose() {
+    _quantity.dispose();
+    _discount.dispose();
+    _notes.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    Navigator.of(context).pop(
+      _LineEditResult(
+        quantity: int.tryParse(_quantity.text) ?? widget.line.quantity,
+        discount: int.tryParse(_discount.text) ?? 0,
+        notes: _notes.text,
       ),
     );
-    if (result == true) {
-      final notifier = ref.read(cartProvider.notifier);
-      final parsedQuantity = int.tryParse(quantity.text) ?? line.quantity;
-      if (parsedQuantity <= 0) {
-        notifier.removeLine(line.id);
-      } else {
-        notifier.setQuantity(line.id, parsedQuantity);
-      }
-      notifier.setLineDiscount(line.id, int.tryParse(discount.text) ?? 0);
-      notifier.setLineNotes(line.id, notes.text);
-    }
-    quantity.dispose();
-    discount.dispose();
-    notes.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.line.productName, maxLines: 2),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _quantity,
+              keyboardType: TextInputType.number,
+              inputFormatters: [
+                FilteringTextInputFormatter.digitsOnly,
+                LengthLimitingTextInputFormatter(3),
+              ],
+              decoration: const InputDecoration(labelText: 'Jumlah'),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            TextField(
+              controller: _discount,
+              keyboardType: TextInputType.number,
+              inputFormatters: [
+                FilteringTextInputFormatter.digitsOnly,
+                LengthLimitingTextInputFormatter(9),
+              ],
+              decoration: const InputDecoration(
+                labelText: 'Diskon item',
+                prefixText: 'Rp ',
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            TextField(
+              controller: _notes,
+              maxLength: 140,
+              decoration: const InputDecoration(labelText: 'Catatan'),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Batal'),
+        ),
+        FilledButton(onPressed: _save, child: const Text('Simpan')),
+      ],
+    );
   }
 }
 
@@ -347,12 +494,15 @@ class _CartLineTile extends StatelessWidget {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  InkWell(
-                    onTap: onDecrement,
-                    child: const Padding(
-                      padding: EdgeInsets.all(6),
-                      child: Icon(Icons.remove_rounded, size: 18),
+                  IconButton(
+                    onPressed: onDecrement,
+                    tooltip: 'Kurangi jumlah',
+                    visualDensity: VisualDensity.compact,
+                    constraints: const BoxConstraints(
+                      minWidth: 44,
+                      minHeight: 44,
                     ),
+                    icon: const Icon(Icons.remove_rounded, size: 18),
                   ),
                   SizedBox(
                     width: 24,
@@ -362,12 +512,15 @@ class _CartLineTile extends StatelessWidget {
                       style: Theme.of(context).textTheme.labelLarge,
                     ),
                   ),
-                  InkWell(
-                    onTap: onIncrement,
-                    child: const Padding(
-                      padding: EdgeInsets.all(6),
-                      child: Icon(Icons.add_rounded, size: 18),
+                  IconButton(
+                    onPressed: onIncrement,
+                    tooltip: 'Tambah jumlah',
+                    visualDensity: VisualDensity.compact,
+                    constraints: const BoxConstraints(
+                      minWidth: 44,
+                      minHeight: 44,
                     ),
+                    icon: const Icon(Icons.add_rounded, size: 18),
                   ),
                 ],
               ),
@@ -450,8 +603,14 @@ class _Totals extends StatelessWidget {
           const Divider(height: 16),
           Row(
             children: [
-              Text('Total', style: Theme.of(context).textTheme.titleMedium),
-              const Spacer(),
+              Expanded(
+                child: Text(
+                  'Total',
+                  style: Theme.of(context).textTheme.titleMedium,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
               Text(
                 formatRupiah(pricing.total),
                 style: Theme.of(
@@ -475,8 +634,15 @@ class _Totals extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
         children: [
-          Text(label, style: style?.copyWith(color: AppColors.inkMuted)),
-          const Spacer(),
+          Expanded(
+            child: Text(
+              label,
+              style: style?.copyWith(color: AppColors.inkMuted),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
           Text(value, style: style),
         ],
       ),
@@ -490,16 +656,52 @@ Future<int?> _askAmount(
   required String label,
   int initial = 0,
   String? helper,
-}) async {
-  final controller = TextEditingController(
-    text: initial == 0 ? '' : '$initial',
-  );
-  final result = await showDialog<int>(
+}) {
+  return showDialog<int>(
     context: context,
-    builder: (context) => AlertDialog(
-      title: Text(title),
+    builder: (_) => _AmountDialog(
+      title: title,
+      label: label,
+      initial: initial,
+      helper: helper,
+    ),
+  );
+}
+
+class _AmountDialog extends StatefulWidget {
+  const _AmountDialog({
+    required this.title,
+    required this.label,
+    required this.initial,
+    this.helper,
+  });
+
+  final String title;
+  final String label;
+  final int initial;
+  final String? helper;
+
+  @override
+  State<_AmountDialog> createState() => _AmountDialogState();
+}
+
+class _AmountDialogState extends State<_AmountDialog> {
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.initial == 0 ? '' : '${widget.initial}',
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
       content: TextField(
-        controller: controller,
+        controller: _controller,
         autofocus: true,
         keyboardType: TextInputType.number,
         inputFormatters: [
@@ -507,9 +709,9 @@ Future<int?> _askAmount(
           LengthLimitingTextInputFormatter(9),
         ],
         decoration: InputDecoration(
-          labelText: label,
+          labelText: widget.label,
           prefixText: 'Rp ',
-          helperText: helper,
+          helperText: widget.helper,
         ),
       ),
       actions: [
@@ -519,12 +721,10 @@ Future<int?> _askAmount(
         ),
         FilledButton(
           onPressed: () =>
-              Navigator.of(context).pop(int.tryParse(controller.text) ?? 0),
+              Navigator.of(context).pop(int.tryParse(_controller.text) ?? 0),
           child: const Text('Simpan'),
         ),
       ],
-    ),
-  );
-  controller.dispose();
-  return result;
+    );
+  }
 }

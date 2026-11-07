@@ -6,6 +6,7 @@ import '../../../core/format/labels.dart';
 import '../../../core/providers.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/async_view.dart';
+import '../../../core/widgets/status_chip.dart';
 import '../../../data/repositories/order_repository.dart';
 import '../state/cart_controller.dart';
 
@@ -27,6 +28,8 @@ class _HeldOrdersSheet extends ConsumerStatefulWidget {
 
 class _HeldOrdersSheetState extends ConsumerState<_HeldOrdersSheet> {
   late Future<List<HeldOrderSummary>> _future;
+  bool _working = false;
+  String? _error;
 
   @override
   void initState() {
@@ -36,11 +39,13 @@ class _HeldOrdersSheetState extends ConsumerState<_HeldOrdersSheet> {
 
   void _reload() {
     setState(() {
+      _error = null;
       _future = ref.read(orderRepositoryProvider).listHeld();
     });
   }
 
   Future<void> _resume(HeldOrderSummary summary) async {
+    if (_working) return;
     final cart = ref.read(cartProvider);
     if (!cart.isEmpty) {
       final replace = await showDialog<bool>(
@@ -66,20 +71,80 @@ class _HeldOrdersSheetState extends ConsumerState<_HeldOrdersSheet> {
       if (replace != true) return;
     }
 
-    final held = await ref.read(orderRepositoryProvider).loadHeld(summary.uuid);
-    if (!mounted) return;
-    if (held == null) {
-      _reload();
-      return;
+    setState(() {
+      _working = true;
+      _error = null;
+    });
+    try {
+      final held = await ref
+          .read(orderRepositoryProvider)
+          .loadHeld(summary.uuid);
+      if (!mounted) return;
+      if (held == null) {
+        _reload();
+        if (!mounted) return;
+        setState(
+          () =>
+              _error = 'Pesanan tahanan tidak ditemukan. Daftar dimuat ulang.',
+        );
+        return;
+      }
+      ref.read(cartProvider.notifier).restore(held.cart);
+      Navigator.of(context).pop();
+    } catch (_) {
+      if (!mounted) return;
+      setState(
+        () => _error =
+            'Pesanan gagal dilanjutkan. Periksa penyimpanan lalu '
+            'coba lagi.',
+      );
+    } finally {
+      if (mounted) setState(() => _working = false);
     }
-    ref.read(cartProvider.notifier).restore(held.cart);
-    Navigator.of(context).pop();
   }
 
   Future<void> _delete(HeldOrderSummary summary) async {
-    await ref.read(orderRepositoryProvider).deleteHeld(summary.uuid);
-    if (!mounted) return;
-    _reload();
+    if (_working) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Hapus pesanan ditahan?'),
+        content: const Text(
+          'Pesanan ini akan dihapus permanen dan tidak bisa dilanjutkan lagi.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            child: const Text('Hapus'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() {
+      _working = true;
+      _error = null;
+    });
+    try {
+      await ref.read(orderRepositoryProvider).deleteHeld(summary.uuid);
+      if (!mounted) return;
+      _reload();
+    } catch (_) {
+      if (!mounted) return;
+      setState(
+        () => _error =
+            'Pesanan gagal dihapus. Periksa penyimpanan lalu '
+            'coba lagi.',
+      );
+    } finally {
+      if (mounted) setState(() => _working = false);
+    }
   }
 
   @override
@@ -104,11 +169,20 @@ class _HeldOrdersSheetState extends ConsumerState<_HeldOrdersSheet> {
                 ),
                 const Spacer(),
                 IconButton(
-                  onPressed: _reload,
+                  onPressed: _working ? null : _reload,
+                  tooltip: 'Muat ulang',
                   icon: const Icon(Icons.refresh_rounded),
                 ),
               ],
             ),
+            if (_error != null) ...[
+              const SizedBox(height: AppSpacing.xs),
+              InfoBanner(
+                message: _error!,
+                tone: StatusTone.danger,
+                icon: Icons.error_outline_rounded,
+              ),
+            ],
             const SizedBox(height: AppSpacing.sm),
             Expanded(
               child: FutureBuilder<List<HeldOrderSummary>>(
@@ -157,12 +231,12 @@ class _HeldOrdersSheetState extends ConsumerState<_HeldOrdersSheet> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             TextButton(
-                              onPressed: () => _resume(order),
+                              onPressed: _working ? null : () => _resume(order),
                               child: const Text('Lanjutkan'),
                             ),
                             IconButton(
                               tooltip: 'Hapus',
-                              onPressed: () => _delete(order),
+                              onPressed: _working ? null : () => _delete(order),
                               icon: const Icon(Icons.delete_outline_rounded),
                             ),
                           ],

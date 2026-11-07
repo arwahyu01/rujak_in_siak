@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/errors/app_exception.dart';
@@ -19,14 +18,12 @@ class DeviceSetupScreen extends ConsumerStatefulWidget {
 class _DeviceSetupScreenState extends ConsumerState<DeviceSetupScreen> {
   final _formKey = GlobalKey<FormState>();
   final _name = TextEditingController(text: 'Kasir 1');
-  final _terminal = TextEditingController(text: 'POS1');
   bool _submitting = false;
   String? _error;
 
   @override
   void dispose() {
     _name.dispose();
-    _terminal.dispose();
     super.dispose();
   }
 
@@ -39,7 +36,7 @@ class _DeviceSetupScreenState extends ConsumerState<DeviceSetupScreen> {
     try {
       await ref
           .read(sessionProvider.notifier)
-          .completeDeviceSetup(name: _name.text, terminalCode: _terminal.text);
+          .completeDeviceSetup(name: _name.text);
     } on AppException catch (error) {
       if (!mounted) return;
       setState(() => _error = error.message);
@@ -58,7 +55,7 @@ class _DeviceSetupScreenState extends ConsumerState<DeviceSetupScreen> {
     return AuthScaffold(
       title: 'Daftarkan perangkat',
       subtitle:
-          'Perangkat ini belum terdaftar. Beri nama terminal agar mudah dikenali di laporan shift.',
+          'Perangkat ini belum terdaftar. Beri nama agar mudah dikenali di laporan. Kode POS dibuat otomatis.',
       footer: TextButton.icon(
         onPressed: () => ref.read(sessionProvider.notifier).logout(),
         icon: const Icon(Icons.logout_rounded, size: 18),
@@ -115,23 +112,6 @@ class _DeviceSetupScreenState extends ConsumerState<DeviceSetupScreen> {
                   : null,
             ),
             const SizedBox(height: AppSpacing.md),
-            TextFormField(
-              controller: _terminal,
-              textCapitalization: TextCapitalization.characters,
-              inputFormatters: [
-                FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9_-]')),
-                LengthLimitingTextInputFormatter(20),
-              ],
-              decoration: const InputDecoration(
-                labelText: 'Kode terminal',
-                hintText: 'POS1',
-                prefixIcon: Icon(Icons.tag_rounded),
-                helperText: 'Huruf/angka, unik di outlet ini.',
-              ),
-              validator: (value) => value == null || value.trim().isEmpty
-                  ? 'Kode terminal wajib diisi'
-                  : null,
-            ),
             const SizedBox(height: AppSpacing.xl),
             FilledButton(
               onPressed: _submitting ? null : _submit,

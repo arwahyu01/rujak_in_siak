@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -40,6 +42,11 @@ class _AppShellState extends ConsumerState<AppShell> {
         // The POS screen surfaces the error with a retry action.
       }
     }
+    unawaited(ref.read(paymentProofQueueProvider).drain());
+  }
+
+  Future<void> _drainProofs() async {
+    await ref.read(paymentProofQueueProvider).drain();
   }
 
   Future<void> _autoSync() async {
@@ -84,7 +91,12 @@ class _AppShellState extends ConsumerState<AppShell> {
     ref.listen(connectivityProvider, (previous, next) {
       final wasOnline = previous?.value ?? false;
       final isOnline = next.value ?? false;
-      if (isOnline && !wasOnline) _autoSync();
+      if (isOnline && !wasOnline) {
+        unawaited(() async {
+          await _autoSync();
+          await _drainProofs();
+        }());
+      }
     });
 
     final session = ref.watch(sessionProvider).value;

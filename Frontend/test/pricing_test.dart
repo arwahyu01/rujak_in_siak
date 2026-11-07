@@ -116,5 +116,35 @@ void main() {
       expect(json['provider_reference'], 'QR-REF-1');
       expect(json.containsKey('tendered_amount'), isFalse);
     });
+
+    test('owner non-cash payment is confirmed without change', () {
+      const draft = LocalPaymentDraft(
+        method: 'qris',
+        amount: 20000,
+        providerReference: 'QR-REF-1',
+        ownerConfirmed: true,
+      );
+
+      expect(draft.status, 'confirmed');
+      expect(draft.changeAmount, 0);
+      final json = draft.toCheckoutJson('key');
+      expect(json['method'], 'qris');
+      expect(json.containsKey('tendered_amount'), isFalse);
+    });
+
+    test('proof path stays local and is never sent in checkout JSON', () {
+      const draft = LocalPaymentDraft(
+        method: 'qris',
+        amount: 20000,
+        providerReference: 'QR-REF-1',
+        idempotencyKey: 'key-qris',
+        proofPath: '/data/payment_proofs/proof_1.jpg',
+      );
+
+      final json = draft.toCheckoutJson('key-qris');
+      expect(json.containsKey('proof_path'), isFalse);
+      expect(json['idempotency_key'], 'key-qris');
+      expect(draft.proofPath, '/data/payment_proofs/proof_1.jpg');
+    });
   });
 }

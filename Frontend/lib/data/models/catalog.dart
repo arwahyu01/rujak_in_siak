@@ -1,6 +1,7 @@
 import '../../core/pricing/pricing_calculator.dart';
 import '../../core/utils/json_utils.dart';
 import 'auth.dart';
+import 'shift.dart';
 
 class CatalogCategory {
   const CatalogCategory({
@@ -250,6 +251,13 @@ class RemoteShift {
     this.openedAt,
     this.expectedCash,
     this.notes,
+    this.closeEpoch = 0,
+    this.isClosing = false,
+    this.openedByName,
+    this.openedDeviceName,
+    this.canFinalize = false,
+    this.pendingDevices = const [],
+    this.serverSummary,
   });
 
   final String uuid;
@@ -258,10 +266,20 @@ class RemoteShift {
   final DateTime? openedAt;
   final int? expectedCash;
   final String? notes;
+  final int closeEpoch;
+  final bool isClosing;
+  final String? openedByName;
+  final String? openedDeviceName;
+  final bool canFinalize;
+  final List<ShiftPendingDevice> pendingDevices;
+  final ShiftServerSummary? serverSummary;
 
   bool get isOpen => status == 'open';
 
   factory RemoteShift.fromJson(Map<String, dynamic> json) {
+    final openedBy = asMapOrNull(json['opened_by']);
+    final openedDevice = asMapOrNull(json['opened_device']);
+    final summary = asMapOrNull(json['summary']);
     return RemoteShift(
       uuid: asStringOr(json['uuid'], ''),
       status: asStringOr(json['status'], 'open'),
@@ -269,6 +287,19 @@ class RemoteShift {
       openedAt: asDate(json['opened_at']),
       expectedCash: asIntOrNull(json['expected_cash']),
       notes: asStringOrNull(json['opening_notes']),
+      closeEpoch: asIntOr(json['close_epoch'], 0),
+      isClosing: asBool(json['is_closing'], false),
+      openedByName: openedBy == null ? null : asStringOrNull(openedBy['name']),
+      openedDeviceName: openedDevice == null
+          ? null
+          : asStringOrNull(openedDevice['name']),
+      canFinalize: asBool(json['can_finalize']),
+      pendingDevices: asMapList(
+        json['pending_devices'],
+      ).map(ShiftPendingDevice.fromJson).toList(growable: false),
+      serverSummary: summary == null
+          ? null
+          : ShiftServerSummary.fromJson(summary),
     );
   }
 
@@ -279,6 +310,17 @@ class RemoteShift {
     'opened_at': openedAt?.toIso8601String(),
     'expected_cash': expectedCash,
     'opening_notes': notes,
+    'close_epoch': closeEpoch,
+    'is_closing': isClosing,
+    'opened_by': openedByName == null ? null : {'name': openedByName},
+    'opened_device': openedDeviceName == null
+        ? null
+        : {'name': openedDeviceName},
+    'can_finalize': canFinalize,
+    'pending_devices': pendingDevices
+        .map((device) => device.toJson())
+        .toList(),
+    'summary': serverSummary?.toJson(),
   };
 }
 
@@ -325,6 +367,7 @@ class BootstrapData {
     required this.products,
     required this.pricingConfig,
     this.paymentMethods = const ['cash', 'qris', 'transfer', 'ewallet'],
+    this.nonCashProofRequired = false,
     this.orderTypes = const ['dine_in', 'take_away', 'delivery'],
     this.receiptNumberFormat = 'RJS-{OUTLET}-{TERMINAL}-{SEQUENCE}',
     this.offlineLeaseMaxHours = 72,
@@ -343,6 +386,7 @@ class BootstrapData {
   final List<CatalogProduct> products;
   final PricingConfig pricingConfig;
   final List<String> paymentMethods;
+  final bool nonCashProofRequired;
   final List<String> orderTypes;
   final String receiptNumberFormat;
   final int offlineLeaseMaxHours;
@@ -363,6 +407,7 @@ class BootstrapData {
     List<CatalogProduct>? products,
     PricingConfig? pricingConfig,
     List<String>? paymentMethods,
+    bool? nonCashProofRequired,
     List<String>? orderTypes,
     String? receiptNumberFormat,
     int? offlineLeaseMaxHours,
@@ -381,6 +426,8 @@ class BootstrapData {
       products: products ?? this.products,
       pricingConfig: pricingConfig ?? this.pricingConfig,
       paymentMethods: paymentMethods ?? this.paymentMethods,
+      nonCashProofRequired:
+          nonCashProofRequired ?? this.nonCashProofRequired,
       orderTypes: orderTypes ?? this.orderTypes,
       receiptNumberFormat: receiptNumberFormat ?? this.receiptNumberFormat,
       offlineLeaseMaxHours: offlineLeaseMaxHours ?? this.offlineLeaseMaxHours,
@@ -418,6 +465,7 @@ class BootstrapData {
       ).map(CatalogProduct.fromJson).toList(growable: false),
       pricingConfig: PricingConfig.fromJson(config),
       paymentMethods: asStringList(config['payment_methods']),
+      nonCashProofRequired: asBool(config['non_cash_proof_required']),
       orderTypes: asStringList(config['order_types']),
       receiptNumberFormat: asStringOr(
         config['receipt_number_format'],
@@ -513,6 +561,7 @@ class BootstrapData {
       },
       'receipt_number_format': receiptNumberFormat,
       'payment_methods': paymentMethods,
+      'non_cash_proof_required': nonCashProofRequired,
       'order_types': orderTypes,
       'offline_lease_max_hours': offlineLeaseMaxHours,
       'sync': syncLimits.toJson(),

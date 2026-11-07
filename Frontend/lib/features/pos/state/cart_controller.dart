@@ -56,7 +56,8 @@ class CartLine {
 
   String get signature {
     final addonIds = addons.map((addon) => addon.uuid).toList()..sort();
-    return '$productUuid|${variantUuid ?? ''}|${addonIds.join(',')}';
+    return '$productUuid|${variantUuid ?? ''}|${addonIds.join(',')}|'
+        '${notes?.trim() ?? ''}';
   }
 
   CartLine copyWith({
@@ -172,7 +173,9 @@ class CartController extends Notifier<CartState> {
     List<CartAddon> addons = const [],
     int taxRateBasisPoints = 0,
     int quantity = 1,
+    String? notes,
   }) {
+    final lineNotes = _cleanNotes(notes);
     final signature = CartLine(
       id: '',
       productUuid: productUuid,
@@ -183,6 +186,7 @@ class CartController extends Notifier<CartState> {
       variantName: variantName,
       addons: addons,
       taxRateBasisPoints: taxRateBasisPoints,
+      notes: lineNotes,
     ).signature;
 
     final index = state.lines.indexWhere((line) => line.signature == signature);
@@ -204,10 +208,11 @@ class CartController extends Notifier<CartState> {
           variantName: variantName,
           addons: List.unmodifiable(addons),
           taxRateBasisPoints: taxRateBasisPoints,
+          notes: lineNotes,
         ),
       );
     }
-    state = state.copyWith(lines: updated);
+    state = _normalize(state.copyWith(lines: updated));
   }
 
   void setQuantity(String lineId, int quantity) {
@@ -215,14 +220,16 @@ class CartController extends Notifier<CartState> {
       removeLine(lineId);
       return;
     }
-    state = state.copyWith(
-      lines: state.lines
-          .map(
-            (line) => line.id == lineId
-                ? line.copyWith(quantity: quantity.clamp(1, 100))
-                : line,
-          )
-          .toList(growable: false),
+    state = _normalize(
+      state.copyWith(
+        lines: state.lines
+            .map(
+              (line) => line.id == lineId
+                  ? line.copyWith(quantity: quantity.clamp(1, 100))
+                  : line,
+            )
+            .toList(growable: false),
+      ),
     );
   }
 
@@ -237,63 +244,82 @@ class CartController extends Notifier<CartState> {
   }
 
   void removeLine(String lineId) {
-    state = state.copyWith(
-      lines: state.lines
-          .where((line) => line.id != lineId)
-          .toList(growable: false),
+    state = _normalize(
+      state.copyWith(
+        lines: state.lines
+            .where((line) => line.id != lineId)
+            .toList(growable: false),
+      ),
     );
   }
 
   void setLineDiscount(String lineId, int discount) {
-    state = state.copyWith(
-      lines: state.lines
-          .map(
-            (line) => line.id == lineId
-                ? line.copyWith(itemDiscount: discount < 0 ? 0 : discount)
-                : line,
-          )
-          .toList(growable: false),
+    state = _normalize(
+      state.copyWith(
+        lines: state.lines
+            .map(
+              (line) => line.id == lineId
+                  ? line.copyWith(itemDiscount: discount < 0 ? 0 : discount)
+                  : line,
+            )
+            .toList(growable: false),
+      ),
     );
   }
 
   void setLineNotes(String lineId, String? notes) {
-    final text = notes?.trim();
-    state = state.copyWith(
-      lines: state.lines
-          .map(
-            (line) => line.id == lineId
-                ? line.copyWith(
-                    notes: text == null || text.isEmpty ? null : text,
-                    clearNotes: text == null || text.isEmpty,
-                  )
-                : line,
-          )
-          .toList(growable: false),
+    final text = _cleanNotes(notes);
+    state = _withoutServerOrder(
+      state.copyWith(
+        lines: state.lines
+            .map(
+              (line) => line.id == lineId
+                  ? line.copyWith(notes: text, clearNotes: text == null)
+                  : line,
+            )
+            .toList(growable: false),
+      ),
     );
   }
 
+  void insertLine(int index, CartLine line) {
+    if (state.lines.any((item) => item.id == line.id)) return;
+    final lines = List<CartLine>.from(state.lines);
+    final position = index.clamp(0, lines.length);
+    lines.insert(position, line);
+    state = _normalize(state.copyWith(lines: lines));
+  }
+
   void setOrderType(String value) {
-    state = state.copyWith(orderType: value, clearTable: value != 'dine_in');
+    state = _withoutServerOrder(
+      state.copyWith(orderType: value, clearTable: value != 'dine_in'),
+    );
   }
 
   void setTableNumber(String? value) {
     final text = value?.trim();
-    state = state.copyWith(
-      tableNumber: text == null || text.isEmpty ? null : text,
-      clearTable: text == null || text.isEmpty,
+    state = _withoutServerOrder(
+      state.copyWith(
+        tableNumber: text == null || text.isEmpty ? null : text,
+        clearTable: text == null || text.isEmpty,
+      ),
     );
   }
 
   void setNotes(String? value) {
     final text = value?.trim();
-    state = state.copyWith(
-      notes: text == null || text.isEmpty ? null : text,
-      clearNotes: text == null || text.isEmpty,
+    state = _withoutServerOrder(
+      state.copyWith(
+        notes: text == null || text.isEmpty ? null : text,
+        clearNotes: text == null || text.isEmpty,
+      ),
     );
   }
 
   void setTransactionDiscount(int value) {
-    state = state.copyWith(transactionDiscount: value < 0 ? 0 : value);
+    final maxDiscount = _maxTransactionDiscount(state.lines);
+    final next = value < 0 ? 0 : (value > maxDiscount ? maxDiscount : value);
+    state = _withoutServerOrder(state.copyWith(transactionDiscount: next));
   }
 
   void linkServerOrder({required String uuid, required int version}) {
@@ -305,11 +331,62 @@ class CartController extends Notifier<CartState> {
   }
 
   void restore(CartState value) {
-    state = value;
+    state = _normalize(value);
   }
 
   void clear() {
     state = const CartState();
+  }
+
+  /// Keeps every discount within the amount it applies to. This prevents the
+  /// pricing calculator from throwing inside widget builds and covers carts
+  /// restored from older local data.
+  CartState _normalize(CartState value) {
+    final lines = value.lines
+        .map((line) {
+          final maxDiscount = line.gross;
+          final discount = line.itemDiscount < 0
+              ? 0
+              : (line.itemDiscount > maxDiscount
+                    ? maxDiscount
+                    : line.itemDiscount);
+          return discount == line.itemDiscount
+              ? line
+              : line.copyWith(itemDiscount: discount);
+        })
+        .toList(growable: false);
+
+    final maxDiscount = _maxTransactionDiscount(lines);
+    final transactionDiscount = value.transactionDiscount < 0
+        ? 0
+        : (value.transactionDiscount > maxDiscount
+              ? maxDiscount
+              : value.transactionDiscount);
+
+    return _withoutServerOrder(
+      value.copyWith(lines: lines, transactionDiscount: transactionDiscount),
+    );
+  }
+
+  /// A server order is a snapshot of the cart that was sent at checkout time.
+  /// Any later local change makes that snapshot stale, so the next checkout
+  /// must create a fresh order instead of reusing the old items.
+  CartState _withoutServerOrder(CartState value) {
+    return value.serverOrderUuid == null
+        ? value
+        : value.copyWith(clearServerOrder: true);
+  }
+
+  int _maxTransactionDiscount(List<CartLine> lines) {
+    return lines.fold<int>(
+      0,
+      (sum, line) => sum + (line.gross - line.itemDiscount),
+    );
+  }
+
+  String? _cleanNotes(String? notes) {
+    final text = notes?.trim();
+    return text == null || text.isEmpty ? null : text;
   }
 
   CartLine? _find(String lineId) {

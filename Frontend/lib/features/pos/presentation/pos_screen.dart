@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/errors/app_exception.dart';
+import '../../../core/format/dates.dart';
 import '../../../core/format/money.dart';
 import '../../../core/pricing/pricing_calculator.dart';
 import '../../../core/providers.dart';
@@ -10,6 +12,7 @@ import '../../../core/widgets/async_view.dart';
 import '../../../core/widgets/status_chip.dart';
 import '../../../data/bootstrap/bootstrap_controller.dart';
 import '../../../data/models/catalog.dart';
+import '../../../data/models/shift.dart';
 import '../../../data/repositories/bootstrap_repository.dart';
 import '../../../data/session/session_controller.dart';
 import '../../../data/shifts/shift_controller.dart';
@@ -28,6 +31,7 @@ class PosScreen extends ConsumerStatefulWidget {
 class _PosScreenState extends ConsumerState<PosScreen> {
   final _search = TextEditingController();
   String? _categoryUuid;
+  bool _holding = false;
 
   @override
   void initState() {
@@ -45,7 +49,29 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     super.dispose();
   }
 
+  bool get _shiftAcceptsTransactions =>
+      ref.read(shiftProvider).value?.hasOpenShift ?? false;
+
+  void _showShiftBlocked() {
+    final shift = ref.read(shiftProvider).value;
+    final message = shift == null || (shift.shift == null && !shift.isClosing)
+        ? 'Status shift belum tersedia. Muat ulang status shift sebelum '
+              'bertransaksi.'
+        : shift.isClosing
+        ? 'Shift outlet sedang ditutup. Transaksi baru ditahan sampai '
+              'penutupan selesai.'
+        : 'Shift outlet belum dibuka. Minta Owner membuka shift sebelum '
+              'bertransaksi.';
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
   Future<void> _addProduct(CatalogProduct product) async {
+    if (!_shiftAcceptsTransactions) {
+      _showShiftBlocked();
+      return;
+    }
     if (product.activeVariants.isNotEmpty || product.activeAddons.isNotEmpty) {
       await showProductOptions(context, product);
       return;
@@ -58,30 +84,42 @@ class _PosScreenState extends ConsumerState<PosScreen> {
           unitPrice: product.price,
           taxRateBasisPoints: product.taxRateBasisPoints,
         );
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text('${product.name} ditambahkan'),
-          duration: const Duration(milliseconds: 1100),
-        ),
-      );
   }
 
   Future<void> _hold() async {
+    if (_holding) return;
     final cart = ref.read(cartProvider);
     if (cart.isEmpty) return;
-    await ref.read(orderRepositoryProvider).hold(cart);
-    if (!mounted) return;
-    ref.read(cartProvider.notifier).clear();
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Pesanan ditahan. Lanjutkan dari daftar tahanan.'),
-      ),
-    );
+    setState(() => _holding = true);
+    try {
+      await ref.read(orderRepositoryProvider).hold(cart);
+      if (!mounted) return;
+      ref.read(cartProvider.notifier).clear();
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('Pesanan ditahan. Lanjutkan dari daftar tahanan.'),
+          ),
+        );
+    } catch (error) {
+      if (!mounted) return;
+      final message = error is AppException
+          ? error.message
+          : 'Pesanan gagal ditahan. Periksa penyimpanan lalu coba lagi.';
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(message)));
+    } finally {
+      if (mounted) setState(() => _holding = false);
+    }
   }
 
   void _checkout() {
+    if (!_shiftAcceptsTransactions) {
+      _showShiftBlocked();
+      return;
+    }
     if (ref.read(cartProvider).isEmpty) return;
     context.push('/checkout');
   }
@@ -91,21 +129,28 @@ class _PosScreenState extends ConsumerState<PosScreen> {
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
-      builder: (context) => SizedBox(
-        height: MediaQuery.sizeOf(context).height * 0.78,
-        child: CartPanel(
-          config: config,
-          compact: true,
-          onCheckout: () {
-            Navigator.of(context).pop();
-            _checkout();
-          },
-          onHold: () {
-            Navigator.of(context).pop();
-            _hold();
-          },
-        ),
-      ),
+      builder: (context) {
+        final media = MediaQuery.of(context);
+        final available = media.size.height - media.viewInsets.bottom;
+        return Padding(
+          padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
+          child: SizedBox(
+            height: available * 0.78,
+            child: CartPanel(
+              config: config,
+              compact: true,
+              onCheckout: () {
+                Navigator.of(context).pop();
+                _checkout();
+              },
+              onHold: () {
+                Navigator.of(context).pop();
+                _hold();
+              },
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -153,21 +198,12 @@ class _PosScreenState extends ConsumerState<PosScreen> {
       );
     }
 
-    if (shift.hasError && !shift.hasValue) {
-      return AppErrorView(
-        error: shift.error!,
-        onRetry: () => ref.read(shiftProvider.notifier).refresh(),
-      );
-    }
-    if (shift.isLoading && !shift.hasValue) {
-      return const AppLoading(label: 'Memeriksa shift…');
-    }
-    if (!(shift.value?.hasOpenShift ?? false)) {
-      return _ShiftGate(refreshing: shift.value == null);
-    }
+    final session = ref.watch(sessionProvider).value;
+    final currentShift = shift.value;
+    final canTransact = currentShift?.hasOpenShift ?? false;
+    final closing = currentShift?.isClosing ?? false;
 
     final config = data.pricingConfig;
-    final session = ref.watch(sessionProvider).value;
     final products = data.products
         .where((product) => product.sellable)
         .toList();
@@ -203,6 +239,17 @@ class _PosScreenState extends ConsumerState<PosScreen> {
               leaseRemaining: session?.lease?.remaining,
               leaseValid: session?.leaseValid ?? false,
             ),
+            if (canTransact && currentShift?.shift != null)
+              _SharedShiftBanner(shift: currentShift!.shift!)
+            else
+              _ShiftNotice(
+                closing: closing,
+                error: shift.error,
+                refreshing: shift.isLoading,
+                canManage: session?.user.can('shifts.manage') ?? false,
+                onRetry: () => ref.read(shiftProvider.notifier).refresh(),
+                onOpenShift: () => context.go('/shift'),
+              ),
             if (state?.lastError != null)
               Padding(
                 padding: const EdgeInsets.fromLTRB(
@@ -375,66 +422,116 @@ class _PosScreenState extends ConsumerState<PosScreen> {
   }
 }
 
-class _ShiftGate extends ConsumerWidget {
-  const _ShiftGate({required this.refreshing});
+class _ShiftNotice extends StatelessWidget {
+  const _ShiftNotice({
+    required this.closing,
+    required this.error,
+    required this.refreshing,
+    required this.canManage,
+    required this.onRetry,
+    required this.onOpenShift,
+  });
 
+  final bool closing;
+  final Object? error;
   final bool refreshing;
+  final bool canManage;
+  final VoidCallback onRetry;
+  final VoidCallback onOpenShift;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return Center(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(AppSpacing.xl),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 460),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 72,
-                height: 72,
-                decoration: const BoxDecoration(
-                  color: AppColors.amberSoft,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.schedule_rounded,
-                  size: 34,
-                  color: AppColors.amber,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.lg),
-              Text(
-                'Shift belum dibuka',
-                style: Theme.of(context).textTheme.headlineSmall,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              Text(
-                'Buka shift dengan mencatat kas awal agar transaksi tercatat '
-                'pada laporan shift yang benar.',
-                textAlign: TextAlign.center,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyMedium?.copyWith(color: AppColors.inkMuted),
-              ),
-              const SizedBox(height: AppSpacing.xl),
-              FilledButton.icon(
-                onPressed: () => context.go('/shift'),
-                icon: const Icon(Icons.play_arrow_rounded),
-                label: const Text('Buka shift'),
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              TextButton.icon(
-                onPressed: refreshing
-                    ? null
-                    : () => ref.read(shiftProvider.notifier).refresh(),
-                icon: const Icon(Icons.refresh_rounded, size: 18),
-                label: const Text('Muat ulang status shift'),
-              ),
-            ],
-          ),
+  Widget build(BuildContext context) {
+    final message = error != null
+        ? 'Status shift tidak dapat diperiksa. Katalog tetap dapat dilihat, '
+              'tetapi transaksi baru ditahan sampai status shift terverifikasi.'
+        : closing
+        ? 'Shift outlet sedang ditutup dan menunggu sinkronisasi perangkat. '
+              'Transaksi baru ditahan sampai penutupan selesai.'
+        : 'Shift outlet belum dibuka. Katalog tetap dapat dilihat, tetapi '
+              'transaksi baru ditahan sampai Owner membuka shift.';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        0,
+        AppSpacing.lg,
+        AppSpacing.sm,
+      ),
+      child: InfoBanner(
+        message: message,
+        tone: error != null || closing ? StatusTone.danger : StatusTone.warning,
+        icon: closing
+            ? Icons.sync_problem_rounded
+            : error != null
+            ? Icons.error_outline_rounded
+            : Icons.schedule_rounded,
+        action: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              onPressed: refreshing ? null : onRetry,
+              tooltip: 'Muat ulang status shift',
+              icon: refreshing
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.refresh_rounded, size: 18),
+            ),
+            TextButton(
+              onPressed: onOpenShift,
+              child: Text(closing || !canManage ? 'Lihat shift' : 'Buka shift'),
+            ),
+          ],
         ),
+      ),
+    );
+  }
+}
+
+class _SharedShiftBanner extends StatelessWidget {
+  const _SharedShiftBanner({required this.shift});
+
+  final ShiftRecord shift;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final openedBy = shift.openedByName;
+    final openedAt = formatDateTime(shift.openedAt);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        0,
+        AppSpacing.lg,
+        AppSpacing.sm,
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.devices_rounded,
+            size: 16,
+            color: AppColors.inkMuted,
+          ),
+          const SizedBox(width: AppSpacing.xs),
+          Expanded(
+            child: Text(
+              openedBy == null
+                  ? 'Shift outlet bersama · dibuka $openedAt'
+                  : 'Shift outlet bersama · $openedBy · $openedAt',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: AppColors.inkMuted,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          StatusChip(
+            label: 'Shift aktif',
+            tone: StatusTone.success,
+            compact: true,
+          ),
+        ],
       ),
     );
   }
@@ -649,7 +746,14 @@ class _CartBar extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final cart = ref.watch(cartProvider);
     if (cart.isEmpty) return const SizedBox.shrink();
-    final total = cart.totalFor(config);
+    var total = 0;
+    var valid = true;
+    try {
+      total = cart.totalFor(config);
+    } catch (_) {
+      // Keep the POS usable even if a legacy cart holds invalid line data.
+      valid = false;
+    }
 
     return Container(
       padding: const EdgeInsets.fromLTRB(
@@ -681,9 +785,9 @@ class _CartBar extends ConsumerWidget {
                       ),
                     ),
                     Text(
-                      formatRupiah(total),
+                      valid ? formatRupiah(total) : 'Perhitungan tidak valid',
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        color: AppColors.forestDark,
+                        color: valid ? AppColors.forestDark : AppColors.danger,
                       ),
                     ),
                   ],
@@ -691,9 +795,15 @@ class _CartBar extends ConsumerWidget {
               ),
             ),
             const Spacer(),
-            OutlinedButton(onPressed: onOpen, child: const Text('Keranjang')),
+            OutlinedButton(
+              onPressed: onOpen,
+              child: Text('Keranjang (${cart.itemCount})'),
+            ),
             const SizedBox(width: AppSpacing.sm),
-            FilledButton(onPressed: onCheckout, child: const Text('Bayar')),
+            FilledButton(
+              onPressed: valid ? onCheckout : null,
+              child: const Text('Bayar'),
+            ),
           ],
         ),
       ),

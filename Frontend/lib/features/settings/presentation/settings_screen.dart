@@ -147,103 +147,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<String?> _askPin(String title, String label) {
-    final controller = TextEditingController();
     return showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          obscureText: true,
-          keyboardType: TextInputType.number,
-          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          decoration: InputDecoration(labelText: label),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Batal'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(controller.text),
-            child: const Text('Lanjut'),
-          ),
-        ],
-      ),
-    ).whenComplete(controller.dispose);
+      builder: (context) => _PinEntryDialog(title: title, label: label),
+    );
   }
 
   Future<String?> _newPinDialog() {
-    final first = TextEditingController();
-    final second = TextEditingController();
-    String? error;
     return showDialog<String>(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Atur PIN lokal'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'PIN lokal mengunci layar kasir dan tidak dikirim ke server.',
-              ),
-              const SizedBox(height: AppSpacing.md),
-              TextField(
-                controller: first,
-                autofocus: true,
-                obscureText: true,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: const InputDecoration(
-                  labelText: 'PIN baru (4-6 digit)',
-                ),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              TextField(
-                controller: second,
-                obscureText: true,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: const InputDecoration(labelText: 'Ulangi PIN'),
-              ),
-              if (error != null) ...[
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  error!,
-                  style: const TextStyle(color: AppColors.danger, fontSize: 12),
-                ),
-              ],
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Batal'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final pin = first.text.trim();
-                if (pin.length < 4 || pin.length > 6) {
-                  setDialogState(() => error = 'PIN harus 4-6 digit.');
-                  return;
-                }
-                if (pin != second.text.trim()) {
-                  setDialogState(() => error = 'Konfirmasi PIN tidak sama.');
-                  return;
-                }
-                Navigator.of(context).pop(pin);
-              },
-              child: const Text('Simpan'),
-            ),
-          ],
-        ),
-      ),
-    ).whenComplete(() {
-      first.dispose();
-      second.dispose();
-    });
+      builder: (context) => const _NewPinDialog(),
+    );
   }
 
   Future<void> _logout() async {
@@ -547,6 +461,136 @@ class _CredentialsDialogState extends State<_CredentialsDialog> {
           child: const Text('Batal'),
         ),
         FilledButton(onPressed: _submit, child: const Text('Perbarui')),
+      ],
+    );
+  }
+}
+
+class _PinEntryDialog extends StatefulWidget {
+  const _PinEntryDialog({required this.title, required this.label});
+
+  final String title;
+  final String label;
+
+  @override
+  State<_PinEntryDialog> createState() => _PinEntryDialogState();
+}
+
+class _PinEntryDialogState extends State<_PinEntryDialog> {
+  final TextEditingController _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    Navigator.of(context).pop(_controller.text.trim());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        obscureText: true,
+        keyboardType: TextInputType.number,
+        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+        decoration: InputDecoration(labelText: widget.label),
+        onSubmitted: (_) => _submit(),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Batal'),
+        ),
+        FilledButton(onPressed: _submit, child: const Text('Lanjut')),
+      ],
+    );
+  }
+}
+
+class _NewPinDialog extends StatefulWidget {
+  const _NewPinDialog();
+
+  @override
+  State<_NewPinDialog> createState() => _NewPinDialogState();
+}
+
+class _NewPinDialogState extends State<_NewPinDialog> {
+  final TextEditingController _first = TextEditingController();
+  final TextEditingController _second = TextEditingController();
+  String? _error;
+
+  @override
+  void dispose() {
+    _first.dispose();
+    _second.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final pin = _first.text.trim();
+    if (pin.length < 4 || pin.length > 6) {
+      setState(() => _error = 'PIN harus 4-6 digit.');
+      return;
+    }
+    if (pin != _second.text.trim()) {
+      setState(() => _error = 'Konfirmasi PIN tidak sama.');
+      return;
+    }
+    Navigator.of(context).pop(pin);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Atur PIN lokal'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            'PIN lokal mengunci layar kasir dan tidak dikirim ke server.',
+          ),
+          const SizedBox(height: AppSpacing.md),
+          TextField(
+            controller: _first,
+            autofocus: true,
+            obscureText: true,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            textInputAction: TextInputAction.next,
+            decoration: const InputDecoration(
+              labelText: 'PIN baru (4-6 digit)',
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          TextField(
+            controller: _second,
+            obscureText: true,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            decoration: const InputDecoration(labelText: 'Ulangi PIN'),
+            onSubmitted: (_) => _save(),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              _error!,
+              style: const TextStyle(color: AppColors.danger, fontSize: 12),
+            ),
+          ],
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Batal'),
+        ),
+        FilledButton(onPressed: _save, child: const Text('Simpan')),
       ],
     );
   }

@@ -74,20 +74,9 @@ class _ProductOptionsSheetState extends ConsumerState<_ProductOptionsSheet> {
           addons: addons,
           taxRateBasisPoints: widget.product.taxRateBasisPoints,
           quantity: _quantity,
+          notes: _notes.text,
         );
 
-    final line = ref.read(cartProvider).lines.last;
-    final note = _notes.text.trim();
-    if (note.isNotEmpty) {
-      final match = ref
-          .read(cartProvider)
-          .lines
-          .where((item) => item.signature == line.signature)
-          .firstOrNull;
-      if (match != null) {
-        ref.read(cartProvider.notifier).setLineNotes(match.id, note);
-      }
-    }
     Navigator.of(context).pop();
   }
 

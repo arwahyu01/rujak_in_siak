@@ -110,7 +110,8 @@ class OrderRepository {
     for (final order in orders) {
       final count = await _db
           .customSelect(
-            'SELECT COUNT(*) AS total FROM order_items WHERE order_uuid = ?',
+            'SELECT COALESCE(SUM(quantity), 0) AS total '
+            'FROM order_items WHERE order_uuid = ?',
             variables: [Variable<String>(order.uuid)],
             readsFrom: {_db.orderItems},
           )

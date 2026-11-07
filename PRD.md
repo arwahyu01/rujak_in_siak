@@ -1221,7 +1221,7 @@ Contoh:
 
 ### Pergantian perangkat
 
-- Perangkat baru memperoleh terminal ID baru.
+- Perangkat baru memperoleh kode terminal otomatis berikutnya yang tersedia di outlet.
 - Terminal ID lama tidak boleh dipakai hardware berbeda.
 - Pemulihan backup harus memulihkan sequence dengan benar.
 - Jika database lokal hilang, perangkat baru harus memakai terminal ID baru.
