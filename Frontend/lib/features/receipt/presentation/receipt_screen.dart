@@ -69,14 +69,18 @@ class _ReceiptScreenState extends ConsumerState<ReceiptScreen> {
   Future<void> _autoPrint() async {
     if (_autoPrintStarted) return;
     _autoPrintStarted = true;
+    final sale = _sale;
     if (widget.outcome == null || !widget.outcome!.printQueued) return;
-    if (!mounted) return;
+    if (sale == null || !mounted) return;
     final config = await ref.read(printerServiceProvider).loadConfig();
     if (!config.configured) return;
+    if (!config.shouldAutoPrint(hasAwaitingPayment: sale.hasAwaitingPayment)) {
+      return;
+    }
     await _print();
   }
 
-  Future<void> _print({bool reprint = false}) async {
+  Future<void> _print() async {
     final sale = _sale;
     final data = ref.read(bootstrapProvider).value?.data;
     if (sale == null || _printing) return;
@@ -106,15 +110,15 @@ class _ReceiptScreenState extends ConsumerState<ReceiptScreen> {
           'Bluetooth perangkat belum aktif.',
         );
       }
-      await _markSendingJob();
+      await _markSendingJobs();
       await printer.printSale(
         sale: sale,
         business: data.business,
         outlet: data.outlet,
         config: config,
-        reprint: reprint,
+        reprint: _isReprint,
       );
-      await _markJob(success: true);
+      await _markJobs(success: true);
       if (!mounted) return;
       setState(() {
         _printing = false;
@@ -125,16 +129,18 @@ class _ReceiptScreenState extends ConsumerState<ReceiptScreen> {
       final message = error is AppException
           ? error.message
           : 'Gagal mencetak struk. Periksa printer lalu coba lagi.';
-      await _markJob(
+      final outcomeUnknown =
+          error is! AppException || error.code == 'PRINT_TIMEOUT';
+      await _markJobs(
         success: false,
         error: message,
-        outcomeUnknown: error is! AppException,
+        outcomeUnknown: outcomeUnknown,
       );
       if (!mounted) return;
       setState(() {
         _printing = false;
         _printed = false;
-        _printError = error is! AppException
+        _printError = outcomeUnknown
             ? '$message Kemungkinan struk sudah tercetak; periksa kertas '
                   'sebelum mencetak ulang.'
             : message;
@@ -142,7 +148,7 @@ class _ReceiptScreenState extends ConsumerState<ReceiptScreen> {
     }
   }
 
-  Future<void> _markSendingJob() async {
+  Future<void> _markSendingJobs() async {
     final sale = _sale;
     if (sale == null) return;
     try {
@@ -151,7 +157,6 @@ class _ReceiptScreenState extends ConsumerState<ReceiptScreen> {
       for (final job in jobs) {
         if (job.saleUuid == sale.uuid) {
           await printer.markSending(job.id);
-          break;
         }
       }
     } catch (_) {
@@ -159,7 +164,7 @@ class _ReceiptScreenState extends ConsumerState<ReceiptScreen> {
     }
   }
 
-  Future<void> _markJob({
+  Future<void> _markJobs({
     required bool success,
     String? error,
     bool outcomeUnknown = false,
@@ -177,7 +182,6 @@ class _ReceiptScreenState extends ConsumerState<ReceiptScreen> {
             error: error,
             outcomeUnknown: outcomeUnknown,
           );
-          break;
         }
       }
     } catch (_) {
@@ -192,6 +196,15 @@ class _ReceiptScreenState extends ConsumerState<ReceiptScreen> {
       context.go('/pos');
     }
   }
+
+  /// History opens are reprints; the receipt was printed at checkout.
+  bool get _isReprint => _printed || widget.outcome == null;
+
+  String get _printLabel => _isReprint
+      ? 'Cetak ulang'
+      : (_sale?.hasAwaitingPayment ?? false)
+      ? 'Cetak bukti pending'
+      : 'Cetak struk';
 
   @override
   Widget build(BuildContext context) {
@@ -208,8 +221,8 @@ class _ReceiptScreenState extends ConsumerState<ReceiptScreen> {
         ),
         actions: [
           IconButton(
-            onPressed: _printing ? null : () => _print(reprint: true),
-            tooltip: 'Cetak ulang',
+            onPressed: _printing ? null : _print,
+            tooltip: _printLabel,
             icon: const Icon(Icons.print_outlined),
           ),
           const SizedBox(width: AppSpacing.xs),
@@ -306,7 +319,7 @@ class _ReceiptScreenState extends ConsumerState<ReceiptScreen> {
                 const SizedBox(height: AppSpacing.lg),
                 if (data != null)
                   OutlinedButton.icon(
-                    onPressed: _printing ? null : () => _print(reprint: true),
+                    onPressed: _printing ? null : _print,
                     icon: _printing
                         ? const SizedBox(
                             width: 18,
@@ -314,7 +327,7 @@ class _ReceiptScreenState extends ConsumerState<ReceiptScreen> {
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
                         : const Icon(Icons.print_outlined),
-                    label: Text(_printing ? 'Mencetak…' : 'Cetak ulang'),
+                    label: Text(_printing ? 'Mencetak…' : _printLabel),
                   ),
                 const SizedBox(height: AppSpacing.sm),
                 FilledButton(

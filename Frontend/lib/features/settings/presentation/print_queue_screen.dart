@@ -78,6 +78,7 @@ class _PrintQueueScreenState extends ConsumerState<PrintQueueScreen> {
         sale: sale,
         business: data.business,
         outlet: data.outlet,
+        reprint: true,
       );
       await printer.markResult(job.id, success: true);
       if (!mounted) return;
@@ -86,31 +87,80 @@ class _PrintQueueScreenState extends ConsumerState<PrintQueueScreen> {
       ).showSnackBar(const SnackBar(content: Text('Struk berhasil dicetak.')));
       await _load();
     } on AppException catch (error) {
-      await printer.markResult(job.id, success: false, error: error.message);
+      final outcomeUnknown = error.code == 'PRINT_TIMEOUT';
+      await printer.markResult(
+        job.id,
+        success: false,
+        error: error.message,
+        outcomeUnknown: outcomeUnknown,
+      );
       if (!mounted) return;
-      setState(() => _error = error);
+      setState(
+        () => _error = outcomeUnknown
+            ? AppException(
+                error.code,
+                '${error.message} Kemungkinan struk sudah tercetak; periksa '
+                'kertas sebelum mencetak ulang.',
+              )
+            : error,
+      );
       await _load();
     } catch (error) {
-      final message = error is AppException
-          ? error.message
-          : 'Gagal mencetak. Periksa printer Bluetooth.';
+      const message = 'Gagal mencetak. Periksa printer Bluetooth.';
       await printer.markResult(
         job.id,
         success: false,
         error: message,
-        outcomeUnknown: error is! AppException,
+        outcomeUnknown: true,
       );
       if (!mounted) return;
       setState(
-        () => _error = AppException(
+        () => _error = const AppException(
           'PRINT_FAILED',
-          error is! AppException
-              ? '$message Kemungkinan struk sudah tercetak; periksa kertas '
-                    'sebelum mencetak ulang.'
-              : message,
+          '$message Kemungkinan struk sudah tercetak; periksa kertas '
+              'sebelum mencetak ulang.',
         ),
       );
       await _load();
+    } finally {
+      if (mounted) setState(() => _busyJob = null);
+    }
+  }
+
+  Future<void> _markPrinted(PrintJobSummary job) async {
+    if (_busyJob != null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Tandai sudah tercetak'),
+        content: Text(
+          'Tandai struk ${job.receiptNumber} sebagai sudah tercetak? '
+          'Lakukan ini hanya jika kertas struk sudah keluar dari printer.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Sudah tercetak'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    setState(() => _busyJob = job.id);
+    try {
+      await ref.read(printerServiceProvider).markPrinted(job.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Struk ditandai sudah tercetak.')),
+      );
+      await _load();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _error = AppException.unknown(error));
     } finally {
       if (mounted) setState(() => _busyJob = null);
     }
@@ -215,24 +265,39 @@ class _PrintQueueScreenState extends ConsumerState<PrintQueueScreen> {
                             ),
                           ],
                           const SizedBox(height: AppSpacing.sm),
-                          OutlinedButton.icon(
-                            onPressed: _busyJob == null
-                                ? () => _retry(job)
-                                : null,
-                            icon: _busyJob == job.id
-                                ? const SizedBox(
-                                    width: 16,
-                                    height: 16,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : const Icon(Icons.print_rounded),
-                            label: Text(
-                              _busyJob == job.id
-                                  ? 'Mencetak…'
-                                  : 'Cetak sekarang',
-                            ),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  onPressed: _busyJob == null
+                                      ? () => _retry(job)
+                                      : null,
+                                  icon: _busyJob == job.id
+                                      ? const SizedBox(
+                                          width: 16,
+                                          height: 16,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : const Icon(Icons.print_rounded),
+                                  label: Text(
+                                    _busyJob == job.id
+                                        ? 'Mencetak…'
+                                        : 'Cetak sekarang',
+                                  ),
+                                ),
+                              ),
+                              if (job.status == 'unknown') ...[
+                                const SizedBox(width: AppSpacing.sm),
+                                TextButton(
+                                  onPressed: _busyJob == null
+                                      ? () => _markPrinted(job)
+                                      : null,
+                                  child: const Text('Sudah tercetak'),
+                                ),
+                              ],
+                            ],
                           ),
                         ],
                       ),

@@ -1,7 +1,6 @@
 import 'package:blue_thermal_printer/blue_thermal_printer.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../../core/errors/app_exception.dart';
 import '../../../core/providers.dart';
@@ -22,6 +21,7 @@ class _PrinterSettingsScreenState extends ConsumerState<PrinterSettingsScreen> {
   PrinterConfig _config = const PrinterConfig();
   List<BluetoothDevice> _devices = const [];
   bool _bluetoothOn = false;
+  bool _connected = false;
   bool _loading = true;
   bool _busy = false;
   String? _error;
@@ -37,12 +37,18 @@ class _PrinterSettingsScreenState extends ConsumerState<PrinterSettingsScreen> {
     try {
       final config = await printer.loadConfig();
       var on = false;
+      var connected = false;
       var devices = const <BluetoothDevice>[];
       String? error;
       try {
         on = await printer.isBluetoothOn();
-        devices = await printer.bondedDevices();
-      } catch (e) {
+        if (on) {
+          connected = await printer.isConnectedTo(config);
+          devices = await printer.bondedDevices();
+        }
+      } on AppException catch (e) {
+        error = e.message;
+      } catch (_) {
         error =
             'Tidak dapat membaca perangkat Bluetooth. Pastikan izin Bluetooth '
             'diberikan pada aplikasi.';
@@ -51,6 +57,7 @@ class _PrinterSettingsScreenState extends ConsumerState<PrinterSettingsScreen> {
       setState(() {
         _config = config;
         _bluetoothOn = on;
+        _connected = connected;
         _devices = devices;
         _error = error;
         _loading = false;
@@ -70,34 +77,101 @@ class _PrinterSettingsScreenState extends ConsumerState<PrinterSettingsScreen> {
       _busy = true;
       _error = null;
     });
+    var saved = false;
     try {
-      if (_config.configured) {
-        await printer.connect(_config);
-      }
       await printer.saveConfig(_config);
+      saved = true;
+      var connected = false;
+      if (_bluetoothOn && _config.hasAddress) {
+        await printer.connect(_config);
+        connected = true;
+      }
       if (!mounted) return;
+      setState(() => _connected = connected);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            _config.configured
+            connected
                 ? 'Printer tersimpan dan terhubung.'
+                : _config.hasAddress
+                ? 'Pengaturan tersimpan. Nyalakan Bluetooth untuk '
+                      'menghubungkan printer.'
                 : 'Pengaturan printer tersimpan.',
           ),
         ),
       );
     } on AppException catch (error) {
       if (!mounted) return;
-      setState(() => _error = error.message);
+      setState(
+        () => _error = saved
+            ? 'Pengaturan tersimpan, tetapi koneksi gagal: ${error.message}'
+            : error.message,
+      );
     } catch (error) {
       if (!mounted) return;
       setState(
-        () => _error =
-            'Gagal menghubungkan printer. Pastikan printer menyala dan '
-            'sudah dipasangkan (paired) di pengaturan Bluetooth Android.',
+        () => _error = saved
+            ? 'Pengaturan tersimpan, tetapi printer tidak dapat dihubungkan. '
+                  'Pastikan printer menyala dan sudah dipasangkan.'
+            : 'Gagal menyimpan pengaturan printer.',
       );
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _testPrint() async {
+    final printer = ref.read(printerServiceProvider);
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await printer.testPrint(_config);
+      if (!mounted) return;
+      setState(() => _connected = true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Tes cetak dikirim ke printer.')),
+      );
+    } on AppException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _connected = false;
+        _error = error.message;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _connected = false;
+        _error =
+            'Tes cetak gagal. Pastikan printer menyala, kertas terpasang, '
+            'dan Bluetooth aktif.';
+      });
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _disconnect() async {
+    final printer = ref.read(printerServiceProvider);
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await printer.disconnect();
+      if (!mounted) return;
+      setState(() => _connected = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Koneksi printer diputuskan.')),
+      );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _openBluetoothSettings() async {
+    await ref.read(printerServiceProvider).openBluetoothSettings();
   }
 
   @override
@@ -125,18 +199,26 @@ class _PrinterSettingsScreenState extends ConsumerState<PrinterSettingsScreen> {
               ),
               children: [
                 InfoBanner(
-                  message: _bluetoothOn
+                  message: _connected
+                      ? 'Printer terhubung dan siap mencetak.'
+                      : _bluetoothOn
                       ? 'Bluetooth aktif. Pilih printer yang sudah dipasangkan.'
                       : 'Bluetooth belum aktif. Nyalakan Bluetooth lalu muat ulang.',
-                  tone: _bluetoothOn ? StatusTone.success : StatusTone.warning,
-                  icon: _bluetoothOn
+                  tone: _connected
+                      ? StatusTone.success
+                      : _bluetoothOn
+                      ? StatusTone.info
+                      : StatusTone.warning,
+                  icon: _connected
                       ? Icons.bluetooth_connected_rounded
+                      : _bluetoothOn
+                      ? Icons.bluetooth_rounded
                       : Icons.bluetooth_disabled_rounded,
                   action: _bluetoothOn
                       ? null
                       : TextButton(
-                          onPressed: () => context.push('/settings'),
-                          child: const Text('Kembali'),
+                          onPressed: _openBluetoothSettings,
+                          child: const Text('Buka pengaturan'),
                         ),
                 ),
                 if (_error != null) ...[
@@ -154,21 +236,38 @@ class _PrinterSettingsScreenState extends ConsumerState<PrinterSettingsScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
+                        DropdownButtonFormField<AutoPrintMode>(
+                          initialValue: _config.autoPrintMode,
+                          decoration: const InputDecoration(
+                            labelText: 'Cetak struk otomatis',
+                            helperText:
+                                'Hanya tunai: struk non-tunai dicetak manual '
+                                'saat menunggu verifikasi.',
+                          ),
+                          items: [
+                            for (final mode in AutoPrintMode.values)
+                              DropdownMenuItem(
+                                value: mode,
+                                child: Text(mode.label),
+                              ),
+                          ],
+                          onChanged: (value) {
+                            if (value == null) return;
+                            setState(() {
+                              _config = _config.copyWith(autoPrintMode: value);
+                            });
+                          },
+                        ),
                         SwitchListTile(
                           contentPadding: EdgeInsets.zero,
-                          value: _config.enabled,
-                          title: const Text('Cetak struk otomatis'),
+                          value: _config.compact,
+                          title: const Text('Mode hemat kertas'),
                           subtitle: const Text(
-                            'Kirim struk ke printer setelah pembayaran.',
+                            'Sembunyikan nama outlet, telepon, dan footer struk.',
                           ),
                           onChanged: (value) {
                             setState(() {
-                              _config = PrinterConfig(
-                                enabled: value,
-                                name: _config.name,
-                                address: _config.address,
-                                paperWidth: _config.paperWidth,
-                              );
+                              _config = _config.copyWith(compact: value);
                             });
                           },
                         ),
@@ -198,11 +297,9 @@ class _PrinterSettingsScreenState extends ConsumerState<PrinterSettingsScreen> {
                                 ? null
                                 : matches.first;
                             setState(() {
-                              _config = PrinterConfig(
-                                enabled: _config.enabled,
-                                name: device?.name ?? _config.name,
+                              _config = _config.copyWith(
+                                name: device?.name,
                                 address: value,
-                                paperWidth: _config.paperWidth,
                               );
                             });
                           },
@@ -232,18 +329,13 @@ class _PrinterSettingsScreenState extends ConsumerState<PrinterSettingsScreen> {
                           onChanged: (value) {
                             if (value == null) return;
                             setState(() {
-                              _config = PrinterConfig(
-                                enabled: _config.enabled,
-                                name: _config.name,
-                                address: _config.address,
-                                paperWidth: value,
-                              );
+                              _config = _config.copyWith(paperWidth: value);
                             });
                           },
                         ),
                         const SizedBox(height: AppSpacing.lg),
                         FilledButton.icon(
-                          onPressed: _busy || !_bluetoothOn ? null : _save,
+                          onPressed: _busy ? null : _save,
                           icon: _busy
                               ? const SizedBox(
                                   width: 18,
@@ -254,9 +346,30 @@ class _PrinterSettingsScreenState extends ConsumerState<PrinterSettingsScreen> {
                                 )
                               : const Icon(Icons.save_outlined),
                           label: Text(
-                            _busy ? 'Menyimpan…' : 'Simpan & hubungkan',
+                            _busy
+                                ? 'Menyimpan…'
+                                : _bluetoothOn
+                                ? 'Simpan & hubungkan'
+                                : 'Simpan pengaturan',
                           ),
                         ),
+                        const SizedBox(height: AppSpacing.sm),
+                        OutlinedButton.icon(
+                          onPressed:
+                              _busy || !_bluetoothOn || !_config.hasAddress
+                              ? null
+                              : _testPrint,
+                          icon: const Icon(Icons.receipt_long_outlined),
+                          label: const Text('Tes cetak'),
+                        ),
+                        if (_connected) ...[
+                          const SizedBox(height: AppSpacing.xs),
+                          TextButton.icon(
+                            onPressed: _busy ? null : _disconnect,
+                            icon: const Icon(Icons.link_off_rounded),
+                            label: const Text('Putuskan koneksi printer'),
+                          ),
+                        ],
                       ],
                     ),
                   ),
