@@ -117,7 +117,9 @@ curl -X POST http://localhost:8000/api/v1/devices/register \
   }'
 ```
 
-Terminal codes are unique per outlet. A revoked device cannot re-register
+`terminal_code` is optional; when omitted, the server assigns the next available
+code (`POS1`, `POS2`, and so on) per outlet. Terminal codes are unique per outlet.
+A revoked device cannot re-register
 (`DEVICE_REVOKED`); a registration from another tenant returns
 `DEVICE_SCOPE_MISMATCH`. `POST /devices/{uuid}/revoke` revokes the device, its
 tokens, sessions, and offline leases.
@@ -171,14 +173,60 @@ catalog at least every 72 hours (`OFFLINE_CATALOG_MAX_AGE_HOURS`).
   `POST /api/v1/payments/{uuid}/verify|reject` by a different officer (online
   only). Void requires no confirmed/awaiting payment; refunds cannot exceed
   confirmed-but-unrefunded amounts.
-- Shifts: open, cash in/out, close with an immutable closing snapshot, and
-  reconcile pending sync. Held orders block close (`SHIFT_HAS_HELD_ORDERS`).
+- Shifts: outlet-scoped, two-phase close with an immutable closing snapshot,
+  and reconcile for shifts pending sync. Held orders block close
+  (`SHIFT_HAS_HELD_ORDERS`).
 - Reports: `GET /api/v1/reports/{sales,payments,products,shifts}` with
   `date_from`, `date_to` (business timezone), and optional `outlet_uuid`.
   Maximum range is 5 years.
 
 Report grouping uses SQL `DATE(transacted_at)`, so `APP_TIMEZONE` must match the
 business timezone. Multi-timezone businesses are not supported in the MVP.
+
+### Shared outlet shift
+
+- An outlet has at most one `open` shift. A second
+  `POST /api/v1/shifts/open` is rejected with `SHIFT_ALREADY_OPEN`, including
+  concurrent requests (outlet row lock plus a unique `(outlet_id, open_slot)`).
+- `GET /api/v1/shifts/active` returns the outlet's `open`/`closing` shift or
+  `data: null`, with `opened_by`, `opened_device`, `summary`, and `sync`.
+  Every authorized device in the outlet receives the same shift UUID.
+- Only `shifts.manage` may open/close shifts and record cash movements.
+  `shifts.view` is read-only, and `shifts.reconcile` handles post-close
+  exceptions. The default `kasir` role has only `shifts.view`.
+- Orders, sales, payments, refunds, and cash movements store the shared
+  `shift_id` while `user_id`/`device_id` continue to identify the actual
+  cashier and device. Orders and checkout are rejected with `SHIFT_REQUIRED`
+  when no shift is active, and with `SHIFT_CLOSING` while closing.
+- Close is two-phase. `POST /api/v1/shifts/close` moves the shift to `closing`,
+  increments `close_epoch`, and registers the closing device. Every device that
+  opened, bootstrapped, or transacted on the shift must call
+  `POST /api/v1/shifts/{uuid}/sync-checkpoint` with an empty outbox and no
+  unresolved server events. The last clean checkpoint writes the immutable
+  snapshot (`closed_confirmed`); until then `sync.pending_devices` lists the
+  blocking devices and their unresolved events.
+- `pending_sync_count` sent by the closing device proves only that device.
+  Closure never relies on `last_seen_at`; evidence is per-device checkpoint
+  epoch plus event sequences.
+- Snapshot totals are computed server-side across all finalized sales,
+  payments, refunds, and cash movements. `opened_by`/`opened_device` are never
+  overwritten; the closer is stored in `closed_by`/`closed_device`.
+- Offline transactions that arrive after finalization are stored as a
+  `SHIFT_CLOSED_LATE_EVENT` conflict and never mutate the snapshot.
+- `POST /api/v1/shifts/{uuid}/reconcile` applies only to
+  `closed_pending_sync`/`closed_sync_exception`. Unresolved events require
+  `force`, and forcing leaves the shift as `closed_sync_exception` rather than
+  confirming completeness.
+
+### Migration note: shared shifts
+
+`2026_11_06_000001_add_shared_outlet_shift_support.php` adds `open_slot`,
+`close_epoch`, closing/closer audit columns, `shift_devices`, and snapshot
+device counters. During migration, legacy open shifts are grouped by outlet;
+the newest shift (`opened_at`, then `id`) keeps `open_slot = 1` and any others
+become `closed_sync_exception` with an audit entry
+`shift.migration_deduplicated`. Historical shifts and reports are not
+rewritten. Re-run `RoleSeeder` to apply the updated default permissions.
 
 ## 9. Sync protocol (Module 11)
 

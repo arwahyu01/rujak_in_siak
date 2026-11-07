@@ -83,6 +83,17 @@ class _PaymentVerificationScreenState
       );
       return;
     }
+    if (payment.proofRequired && !payment.hasProof) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Bukti pembayaran wajib diunggah sebelum pembayaran ini '
+            'diverifikasi.',
+          ),
+        ),
+      );
+      return;
+    }
     final input = await showDialog<_VerifyInput>(
       context: context,
       builder: (context) => _VerifyDialog(payment: payment),
@@ -307,7 +318,7 @@ class _PaymentVerificationCard extends StatelessWidget {
                 payment.providerReference!.isNotEmpty) ...[
               const SizedBox(height: AppSpacing.xs),
               Text(
-                'Ref: ${payment.providerReference}',
+                'Catatan: ${payment.providerReference}',
                 style: theme.textTheme.bodySmall,
               ),
             ],
@@ -318,6 +329,20 @@ class _PaymentVerificationCard extends StatelessWidget {
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: AppColors.inkMuted,
                 ),
+              ),
+            ],
+            if (payment.hasProof) ...[
+              const SizedBox(height: AppSpacing.sm),
+              _ProofPreview(uuid: payment.uuid),
+            ],
+            if (payment.proofRequired && !payment.hasProof) ...[
+              const SizedBox(height: AppSpacing.sm),
+              const InfoBanner(
+                message:
+                    'Bukti pembayaran wajib diunggah sebelum pembayaran ini '
+                    'dapat diverifikasi.',
+                tone: StatusTone.danger,
+                icon: Icons.image_not_supported_outlined,
               ),
             ],
             if (isOwnPayment) ...[
@@ -347,7 +372,11 @@ class _PaymentVerificationCard extends StatelessWidget {
                 if (canVerify)
                   Expanded(
                     child: FilledButton(
-                      onPressed: busy || isOwnPayment ? null : onVerify,
+                      onPressed: busy ||
+                              isOwnPayment ||
+                              (payment.proofRequired && !payment.hasProof)
+                          ? null
+                          : onVerify,
                       child: const Text('Verifikasi'),
                     ),
                   ),
@@ -356,6 +385,112 @@ class _PaymentVerificationCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _ProofPreview extends ConsumerStatefulWidget {
+  const _ProofPreview({required this.uuid});
+
+  final String uuid;
+
+  @override
+  ConsumerState<_ProofPreview> createState() => _ProofPreviewState();
+}
+
+class _ProofPreviewState extends ConsumerState<_ProofPreview> {
+  late Future<Uint8List> _future = _load();
+
+  Future<Uint8List> _load() => ref.read(paymentApiProvider).proof(widget.uuid);
+
+  void _retry() {
+    setState(() => _future = _load());
+  }
+
+  void _open(Uint8List bytes) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.black,
+        insetPadding: const EdgeInsets.all(AppSpacing.sm),
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: InteractiveViewer(
+                minScale: 0.8,
+                maxScale: 5,
+                child: Center(child: Image.memory(bytes)),
+              ),
+            ),
+            Positioned(
+              top: AppSpacing.xs,
+              right: AppSpacing.xs,
+              child: IconButton(
+                onPressed: () => Navigator.of(context).pop(),
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.black54,
+                  foregroundColor: Colors.white,
+                ),
+                icon: const Icon(Icons.close_rounded),
+                tooltip: 'Tutup',
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          'Bukti pembayaran',
+          style: theme.textTheme.titleSmall?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        FutureBuilder<Uint8List>(
+          future: _future,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const Padding(
+                padding: EdgeInsets.all(AppSpacing.sm),
+                child: LinearProgressIndicator(),
+              );
+            }
+            final bytes = snapshot.data;
+            if (snapshot.hasError || bytes == null) {
+              return Row(
+                children: [
+                  const Expanded(child: Text('Bukti tidak dapat dimuat.')),
+                  TextButton(
+                    onPressed: _retry,
+                    child: const Text('Muat ulang bukti'),
+                  ),
+                ],
+              );
+            }
+            return InkWell(
+              onTap: () => _open(bytes),
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(AppRadius.sm),
+                child: Image.memory(
+                  bytes,
+                  height: 120,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                ),
+              ),
+            );
+          },
+        ),
+      ],
     );
   }
 }
@@ -441,7 +576,7 @@ class _VerifyDialogState extends State<_VerifyDialog> {
             TextField(
               controller: _reference,
               decoration: const InputDecoration(
-                labelText: 'Referensi pembayaran',
+                labelText: 'Catatan pembayaran (opsional)',
               ),
             ),
             const SizedBox(height: AppSpacing.md),

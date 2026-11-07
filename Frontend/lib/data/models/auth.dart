@@ -27,6 +27,8 @@ class AppUser {
   final bool hasPin;
   final int authenticationVersion;
 
+  bool get isOwner => roles.contains('owner');
+
   bool can(String permission) => permissions.contains(permission);
 
   bool canAny(Iterable<String> values) => values.any(permissions.contains);

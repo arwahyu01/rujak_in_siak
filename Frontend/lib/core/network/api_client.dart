@@ -1,4 +1,7 @@
+import 'dart:developer' as developer;
+
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 
 import '../config/app_config.dart';
 import '../errors/app_exception.dart';
@@ -48,12 +51,29 @@ class ApiClient {
     return url;
   }
 
-  void configure({String? baseUrl, String? token, String? deviceUuid}) {
+  static const Object _unset = Object();
+
+  /// Only the arguments provided are updated. Passing `null` explicitly still
+  /// clears a value, so callers must rely on the named argument being omitted
+  /// to keep the current token/device.
+  void configure({
+    String? baseUrl,
+    Object? token = _unset,
+    Object? deviceUuid = _unset,
+  }) {
     if (baseUrl != null && baseUrl.trim().isNotEmpty) {
       _baseUrl = _normalize(baseUrl);
     }
-    _token = token;
-    _deviceUuid = deviceUuid;
+    if (!identical(token, _unset)) {
+      _token = token as String?;
+    }
+    if (!identical(deviceUuid, _unset)) {
+      _deviceUuid = deviceUuid as String?;
+    }
+    _log(
+      '[CFG] base=$_baseUrl · token=${_token == null ? 'none' : 'set'} '
+      '· device=${_hasDevice ? 'set' : 'missing'}',
+    );
   }
 
   void clearToken() => _token = null;
@@ -94,6 +114,99 @@ class ApiClient {
     bool authenticated = true,
   }) => _send('PUT', path, body: body, authenticated: authenticated);
 
+  Future<ApiResult> postMultipart(
+    String path, {
+    required String field,
+    required String filePath,
+    String? filename,
+    Map<String, String> fields = const {},
+    bool authenticated = true,
+  }) async {
+    final url = '$_baseUrl/${path.replaceFirst(RegExp(r'^/+'), '')}';
+    final stopwatch = Stopwatch()..start();
+    _log(
+      '[REQ] POST(multipart) $url · auth=${_token == null ? 'none' : 'bearer'}',
+    );
+    try {
+      final form = FormData.fromMap({
+        ...fields,
+        field: await MultipartFile.fromFile(filePath, filename: filename),
+      });
+      final response = await _dio.post<dynamic>(
+        url,
+        data: form,
+        options: Options(
+          headers: _headers(authenticated: authenticated),
+          contentType: 'multipart/form-data',
+          sendTimeout: AppConfig.uploadTimeout,
+          receiveTimeout: AppConfig.uploadTimeout,
+        ),
+      );
+      stopwatch.stop();
+      _log(
+        '[RES] ${response.statusCode} POST(multipart) $url '
+        '· ${stopwatch.elapsedMilliseconds}ms',
+      );
+      final envelope = asMap(response.data);
+      return ApiResult(envelope['data'], meta: asMap(envelope['meta']));
+    } on DioException catch (error) {
+      stopwatch.stop();
+      final mapped = _mapError(error);
+      _log(
+        '[ERR] POST(multipart) $url · '
+        '${error.response?.statusCode ?? error.type.name} · '
+        '${stopwatch.elapsedMilliseconds}ms · ${mapped.code}: ${mapped.message}',
+        error: error,
+      );
+      if (mapped.isUnauthorized && authenticated) {
+        onUnauthorized?.call();
+      }
+      throw mapped;
+    } on AppException {
+      rethrow;
+    } catch (error) {
+      stopwatch.stop();
+      _log('[ERR] POST(multipart) $url · unexpected error', error: error);
+      throw AppException.unknown(error);
+    }
+  }
+
+  Future<Uint8List> getBytes(String path, {bool authenticated = true}) async {
+    final url = '$_baseUrl/${path.replaceFirst(RegExp(r'^/+'), '')}';
+    try {
+      final response = await _dio.get<List<int>>(
+        url,
+        options: Options(
+          responseType: ResponseType.bytes,
+          headers: _headers(authenticated: authenticated),
+        ),
+      );
+      final data = response.data;
+      return data is Uint8List
+          ? data
+          : Uint8List.fromList(data ?? const <int>[]);
+    } on DioException catch (error) {
+      final mapped = _mapError(error);
+      if (mapped.isUnauthorized && authenticated) {
+        onUnauthorized?.call();
+      }
+      throw mapped;
+    } on AppException {
+      rethrow;
+    } catch (error) {
+      throw AppException.unknown(error);
+    }
+  }
+
+  bool get _hasDevice => _deviceUuid != null && _deviceUuid!.isNotEmpty;
+
+  /// Debug-only diagnostics. Never logs tokens or request bodies (login
+  /// payloads contain credentials).
+  static void _log(String message, {Object? error}) {
+    if (!kDebugMode) return;
+    developer.log(message, name: 'ApiClient', error: error);
+  }
+
   Future<ApiResult> _send(
     String method,
     String path, {
@@ -102,9 +215,15 @@ class ApiClient {
     Map<String, String>? headers,
     bool authenticated = true,
   }) async {
+    final url = '$_baseUrl/${path.replaceFirst(RegExp(r'^/+'), '')}';
+    final stopwatch = Stopwatch()..start();
+    _log(
+      '[REQ] $method $url · auth=${_token == null ? 'none' : 'bearer'} '
+      '· device=${_hasDevice ? 'set' : 'MISSING'}',
+    );
     try {
       final response = await _dio.request<dynamic>(
-        '$_baseUrl/${path.replaceFirst(RegExp(r'^/+'), '')}',
+        url,
         data: body,
         queryParameters: query,
         options: Options(
@@ -115,11 +234,27 @@ class ApiClient {
           },
         ),
       );
+      stopwatch.stop();
+      _log(
+        '[RES] ${response.statusCode} $method $url '
+        '· ${stopwatch.elapsedMilliseconds}ms',
+      );
 
       final envelope = asMap(response.data);
       return ApiResult(envelope['data'], meta: asMap(envelope['meta']));
     } on DioException catch (error) {
+      stopwatch.stop();
       final mapped = _mapError(error);
+      final response = error.response;
+      final payload = asMap(asMap(response?.data)['error']);
+      _log(
+        '[ERR] $method $url · ${response?.statusCode ?? error.type.name} '
+        '· ${stopwatch.elapsedMilliseconds}ms · ${mapped.code}: '
+        '${mapped.message}'
+        '${payload.isEmpty ? '' : ' · body=${payload['code']}:${payload['message']}'}'
+        '${response == null ? ' · ${error.message}' : ''}',
+        error: error,
+      );
       if (mapped.isUnauthorized && authenticated) {
         onUnauthorized?.call();
       }
@@ -127,6 +262,8 @@ class ApiClient {
     } on AppException {
       rethrow;
     } catch (error) {
+      stopwatch.stop();
+      _log('[ERR] $method $url · unexpected error', error: error);
       throw AppException.unknown(error);
     }
   }

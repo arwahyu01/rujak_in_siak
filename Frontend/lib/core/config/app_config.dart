@@ -6,11 +6,13 @@ class AppConfig {
   /// flutter run --dart-define=API_BASE_URL=http://192.168.1.10:8000/api/v1
   static const String defaultApiBaseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: 'http://10.0.2.2:8000/api/v1',
+    defaultValue:
+        'http://192.168.100.11/Rujak%20In%20Siak/Backend/public/api/v1',
   );
 
   static const String appVersion = '1.0.0';
   static const Duration requestTimeout = Duration(seconds: 25);
+  static const Duration uploadTimeout = Duration(seconds: 60);
   static const Duration catalogWarnAfter = Duration(hours: 24);
   static const Duration catalogBlockAfter = Duration(hours: 72);
   static const Duration lockAfterBackground = Duration(minutes: 5);

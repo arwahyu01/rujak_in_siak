@@ -1,19 +1,25 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../../core/errors/app_exception.dart';
 import '../../../core/format/labels.dart';
 import '../../../core/format/money.dart';
 import '../../../core/pricing/pricing_calculator.dart';
 import '../../../core/providers.dart';
+import '../../../core/utils/app_uuid.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/widgets/async_view.dart';
 import '../../../core/widgets/status_chip.dart';
 import '../../../data/bootstrap/bootstrap_controller.dart';
 import '../../../data/models/sale.dart';
 import '../../../data/repositories/bootstrap_repository.dart';
+import '../../../data/services/proof_image_service.dart';
 import '../../../data/session/session_controller.dart';
 import '../../../data/shifts/shift_controller.dart';
 import '../../../data/sync/sync_controller.dart';
@@ -32,10 +38,13 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   AppException? _error;
   bool _serverOrderPending = false;
   bool _initialised = false;
+  bool _checkoutSucceeded = false;
+  late final ProofImageService _imageService;
 
   @override
   void initState() {
     super.initState();
+    _imageService = ref.read(proofImageServiceProvider);
     WidgetsBinding.instance.addPostFrameCallback((_) => _initialise());
   }
 
@@ -44,10 +53,19 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     _initialised = true;
     final snapshot = ref.read(bootstrapProvider).value?.snapshot;
     final cart = ref.read(cartProvider);
-    final pricing = cart.calculate(
-      snapshot?.data?.pricingConfig ?? const PricingConfig(),
-    );
+    PricingResult? pricing;
+    try {
+      pricing = cart.calculate(
+        snapshot?.data?.pricingConfig ?? const PricingConfig(),
+      );
+    } catch (_) {
+      return;
+    }
     if (pricing == null) return;
+    if (pricing.total <= 0) {
+      setState(() {});
+      return;
+    }
     final methods = _methods(snapshot?.data?.paymentMethods ?? const []);
     final draft = _PaymentDraft(
       method: methods.contains('cash') ? 'cash' : methods.first,
@@ -70,9 +88,43 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   @override
   void dispose() {
     for (final draft in _drafts) {
+      if (!_checkoutSucceeded) {
+        unawaited(_imageService.delete(draft.proofPath));
+      }
       draft.dispose();
     }
     super.dispose();
+  }
+
+  Future<void> _attachProof(_PaymentDraft draft, ImageSource source) async {
+    try {
+      final path = await _imageService.pick(source);
+      if (path == null || !mounted) return;
+      final previous = draft.proofPath;
+      setState(() => draft.proofPath = path);
+      await _imageService.delete(previous);
+    } on AppException catch (error) {
+      if (!mounted) return;
+      setState(() => _error = error);
+    }
+  }
+
+  void _removeProof(_PaymentDraft draft) {
+    final previous = draft.proofPath;
+    setState(() => draft.proofPath = null);
+    unawaited(_imageService.delete(previous));
+  }
+
+  void _changeMethod(_PaymentDraft draft, String method) {
+    if (draft.method == method) return;
+    final previousProof = draft.proofPath;
+    setState(() {
+      draft.method = method;
+      if (method == 'cash') draft.proofPath = null;
+    });
+    if (method == 'cash') {
+      unawaited(_imageService.delete(previousProof));
+    }
   }
 
   bool get _isSplit => _drafts.length > 1;
@@ -94,7 +146,9 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   }
 
   void _addDraft() {
-    final remaining = _total - _sum();
+    final total = _total;
+    if (total <= 0) return;
+    final remaining = total - _sum();
     final methods = _methods(
       ref.read(bootstrapProvider).value?.data?.paymentMethods ?? const [],
     );
@@ -117,6 +171,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     setState(() {
       _drafts.remove(draft);
     });
+    unawaited(_imageService.delete(draft.proofPath));
     draft.dispose();
   }
 
@@ -137,72 +192,97 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       );
       return;
     }
+    if (!shift.acceptsTransactions) {
+      setState(
+        () => _error = AppException(
+          shift.isClosing ? 'SHIFT_CLOSING' : 'SHIFT_NOT_OPEN',
+          shift.isClosing
+              ? 'Shift outlet sedang ditutup dan menunggu sinkronisasi. '
+                    'Transaksi baru ditahan sampai Owner menyelesaikan penutupan.'
+              : 'Shift outlet sudah tidak aktif. Minta Owner membuka shift '
+                    'sebelum memproses transaksi.',
+        ),
+      );
+      return;
+    }
     final pricing = cart.calculate(data.pricingConfig);
     if (pricing == null) return;
 
     final drafts = <LocalPaymentDraft>[];
     var sum = 0;
-    for (final draft in _drafts) {
-      final amount = _isSplit ? draft.amountValue : pricing.total;
-      if (amount <= 0) {
-        setState(
-          () => _error = const AppException(
-            'PAYMENT_AMOUNT_INVALID',
-            'Nominal setiap pembayaran harus lebih besar dari nol.',
-          ),
-        );
-        return;
-      }
-      if (draft.method == 'cash') {
-        final tendered = draft.tenderedValue ?? amount;
-        if (tendered < amount) {
+    // A zero-total sale (for example a 100% discount) is valid and needs no
+    // payment records; only payment-bearing sales validate the drafts.
+    if (pricing.total > 0) {
+      for (final draft in _drafts) {
+        final amount = _isSplit ? draft.amountValue : pricing.total;
+        if (amount <= 0) {
           setState(
             () => _error = const AppException(
-              'CASH_TENDERED_INSUFFICIENT',
-              'Uang tunai diterima kurang dari nominal pembayaran.',
+              'PAYMENT_AMOUNT_INVALID',
+              'Nominal setiap pembayaran harus lebih besar dari nol.',
             ),
           );
           return;
         }
-      } else if (draft.reference.text.trim().isEmpty) {
+        if (draft.method == 'cash') {
+          final tendered = draft.tenderedValue ?? amount;
+          if (tendered < amount) {
+            setState(
+              () => _error = const AppException(
+                'CASH_TENDERED_INSUFFICIENT',
+                'Uang tunai diterima kurang dari nominal pembayaran.',
+              ),
+            );
+            return;
+          }
+        } else if (data.nonCashProofRequired &&
+            !session.user.isOwner &&
+            (draft.proofPath == null || draft.proofPath!.isEmpty)) {
+          setState(
+            () => _error = const AppException(
+              'PAYMENT_PROOF_REQUIRED',
+              'Foto bukti pembayaran wajib dilampirkan untuk pembayaran '
+                  'non-tunai sesuai pengaturan Owner.',
+            ),
+          );
+          return;
+        }
+        sum += amount;
+        drafts.add(
+          LocalPaymentDraft(
+            method: draft.method,
+            amount: amount,
+            tenderedAmount: draft.method == 'cash'
+                ? draft.tenderedValue ?? amount
+                : null,
+            providerReference: draft.method == 'cash'
+                ? null
+                : draft.reference.text.trim(),
+            idempotencyKey: draft.idempotencyKey,
+            proofPath: draft.method == 'cash' ? null : draft.proofPath,
+            ownerConfirmed: session.user.isOwner,
+          ),
+        );
+      }
+
+      if (sum != pricing.total) {
         setState(
-          () => _error = const AppException(
-            'PROVIDER_REFERENCE_REQUIRED',
-            'Referensi pembayaran non-tunai wajib diisi.',
+          () => _error = AppException(
+            'PAYMENT_TOTAL_MISMATCH',
+            'Total pembayaran ${formatRupiah(sum)} belum sama dengan total '
+                'transaksi ${formatRupiah(pricing.total)}.',
           ),
         );
         return;
       }
-      sum += amount;
-      drafts.add(
-        LocalPaymentDraft(
-          method: draft.method,
-          amount: amount,
-          tenderedAmount: draft.method == 'cash'
-              ? draft.tenderedValue ?? amount
-              : null,
-          providerReference: draft.method == 'cash'
-              ? null
-              : draft.reference.text.trim(),
-        ),
-      );
-    }
-
-    if (sum != pricing.total) {
-      setState(
-        () => _error = AppException(
-          'PAYMENT_TOTAL_MISMATCH',
-          'Total pembayaran ${formatRupiah(sum)} belum sama dengan total '
-              'transaksi ${formatRupiah(pricing.total)}.',
-        ),
-      );
-      return;
     }
 
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Konfirmasi pembayaran'),
+        title: Text(
+          pricing.total == 0 ? 'Konfirmasi transaksi' : 'Konfirmasi pembayaran',
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -230,8 +310,12 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              drafts.any((payment) => payment.method != 'cash')
-                  ? 'Pembayaran non-tunai akan berstatus menunggu verifikasi.'
+              pricing.total == 0
+                  ? 'Tidak ada pembayaran karena total transaksi Rp0.'
+                  : drafts.any((payment) => payment.method != 'cash')
+                  ? session.user.isOwner
+                        ? 'Pembayaran non-tunai langsung dikonfirmasi sebagai owner.'
+                        : 'Pembayaran non-tunai akan berstatus menunggu verifikasi.'
                   : 'Pembayaran tunai langsung dikonfirmasi.',
               style: Theme.of(
                 context,
@@ -270,6 +354,8 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
             session: session,
           );
       if (!mounted) return;
+      _checkoutSucceeded = true;
+      unawaited(ref.read(paymentProofQueueProvider).drain());
       ref.read(cartProvider.notifier).clear();
       await ref.read(shiftProvider.notifier).refresh();
       try {
@@ -281,6 +367,12 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
       context.pushReplacement('/receipt', extra: outcome);
     } on AppException catch (error) {
       if (!mounted) return;
+      if (error.code == 'SHIFT_CLOSING' ||
+          error.code == 'SHIFT_REQUIRED' ||
+          error.code == 'SHIFT_ALREADY_CLOSED' ||
+          error.code == 'SHIFT_CLOSED_LATE_EVENT') {
+        await ref.read(shiftProvider.notifier).refresh();
+      }
       final orderUuid = error.details?['order_uuid'];
       final orderVersion = error.details?['order_version'];
       if (orderUuid is String && orderUuid.isNotEmpty) {
@@ -312,7 +404,15 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     final session = ref.watch(sessionProvider).value;
     final shift = ref.watch(shiftProvider).value?.shift;
     final config = data?.pricingConfig;
-    final pricing = config == null ? null : cart.calculate(config);
+    PricingResult? pricing;
+    if (config != null) {
+      try {
+        pricing = cart.calculate(config);
+      } catch (_) {
+        // Never let invalid line data escape a widget build.
+        pricing = null;
+      }
+    }
 
     if (pricing == null || data == null) {
       return Scaffold(
@@ -442,49 +542,65 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                   icon: Icons.cloud_off_rounded,
                 ),
               ),
-            Row(
-              children: [
-                Text(
-                  'Pembayaran',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const Spacer(),
-                if (_drafts.length > 1)
-                  const StatusChip(
-                    label: 'Split pembayaran',
-                    tone: StatusTone.info,
-                    icon: Icons.call_split_rounded,
-                    compact: true,
+            if (pricing.total > 0) ...[
+              Row(
+                children: [
+                  Text(
+                    'Pembayaran',
+                    style: Theme.of(context).textTheme.titleMedium,
                   ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            for (final draft in _drafts)
-              Padding(
-                padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                child: _PaymentCard(
-                  draft: draft,
-                  methods: _methods(data.paymentMethods),
-                  split: _isSplit,
-                  total: pricing.total,
-                  onChanged: () => setState(() {}),
-                  onRemove: _drafts.length > 1
-                      ? () => _removeDraft(draft)
-                      : null,
-                ),
+                  const Spacer(),
+                  if (_drafts.length > 1)
+                    const StatusChip(
+                      label: 'Split pembayaran',
+                      tone: StatusTone.info,
+                      icon: Icons.call_split_rounded,
+                      compact: true,
+                    ),
+                ],
               ),
-            OutlinedButton.icon(
-              onPressed: _drafts.length >= 5 ? null : _addDraft,
-              icon: const Icon(Icons.add_rounded),
-              label: const Text('Tambah pembayaran'),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            _PaymentSummary(
-              total: pricing.total,
-              paid: sum,
-              remaining: remaining,
-              split: _isSplit,
-            ),
+              const SizedBox(height: AppSpacing.sm),
+              for (final draft in _drafts)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                  child: _PaymentCard(
+                    draft: draft,
+                    methods: _methods(data.paymentMethods),
+                    split: _isSplit,
+                    total: pricing.total,
+                    onChanged: () => setState(() {}),
+                    onMethodChanged: (method) => _changeMethod(draft, method),
+                    onPickProof: (source) => _attachProof(draft, source),
+                    onRemoveProof: () => _removeProof(draft),
+                    proofRequired:
+                        data.nonCashProofRequired &&
+                        !(session?.user.isOwner ?? false),
+                    onRemove: _drafts.length > 1
+                        ? () => _removeDraft(draft)
+                        : null,
+                  ),
+                ),
+              OutlinedButton.icon(
+                onPressed: _drafts.length >= 5 ? null : _addDraft,
+                icon: const Icon(Icons.add_rounded),
+                label: const Text('Tambah pembayaran'),
+              ),
+              const SizedBox(height: AppSpacing.lg),
+              _PaymentSummary(
+                total: pricing.total,
+                paid: sum,
+                remaining: remaining,
+                split: _isSplit,
+              ),
+            ] else ...[
+              const InfoBanner(
+                message:
+                    'Total transaksi Rp0. Tidak ada pembayaran yang perlu '
+                    'dicatat; transaksi dapat langsung diselesaikan.',
+                tone: StatusTone.info,
+                icon: Icons.receipt_long_outlined,
+              ),
+            ],
           ],
         ),
         bottomNavigationBar: SafeArea(
@@ -507,7 +623,11 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                         color: Colors.white,
                       ),
                     )
-                  : Text('Proses pembayaran · ${formatRupiah(pricing.total)}'),
+                  : Text(
+                      pricing.total == 0
+                          ? 'Selesaikan transaksi'
+                          : 'Proses pembayaran · ${formatRupiah(pricing.total)}',
+                    ),
             ),
           ),
         ),
@@ -524,6 +644,8 @@ class _PaymentDraft {
       );
 
   String method;
+  final String idempotencyKey = newUuid();
+  String? proofPath;
   final TextEditingController amount;
   final TextEditingController tendered;
   final TextEditingController reference = TextEditingController();
@@ -561,6 +683,10 @@ class _PaymentCard extends StatelessWidget {
     required this.split,
     required this.total,
     required this.onChanged,
+    required this.onMethodChanged,
+    required this.onPickProof,
+    required this.onRemoveProof,
+    this.proofRequired = false,
     this.onRemove,
   });
 
@@ -569,6 +695,10 @@ class _PaymentCard extends StatelessWidget {
   final bool split;
   final int total;
   final VoidCallback onChanged;
+  final ValueChanged<String> onMethodChanged;
+  final ValueChanged<ImageSource> onPickProof;
+  final VoidCallback onRemoveProof;
+  final bool proofRequired;
   final VoidCallback? onRemove;
 
   @override
@@ -601,7 +731,7 @@ class _PaymentCard extends StatelessWidget {
                     ],
                     onChanged: (value) {
                       if (value == null) return;
-                      draft.method = value;
+                      onMethodChanged(value);
                       onChanged();
                     },
                   ),
@@ -687,9 +817,9 @@ class _PaymentCard extends StatelessWidget {
                 controller: draft.reference,
                 textCapitalization: TextCapitalization.characters,
                 decoration: const InputDecoration(
-                  labelText: 'Referensi pembayaran',
-                  hintText: 'Nomor transaksi QRIS/transfer/e-wallet',
-                  prefixIcon: Icon(Icons.numbers_rounded),
+                  labelText: 'Catatan pembayaran (opsional)',
+                  hintText: 'Contoh: nama pelanggan atau referensi transaksi',
+                  prefixIcon: Icon(Icons.notes_rounded),
                   isDense: true,
                 ),
               ),
@@ -700,7 +830,113 @@ class _PaymentCard extends StatelessWidget {
                   context,
                 ).textTheme.bodySmall?.copyWith(color: AppColors.inkMuted),
               ),
+              const SizedBox(height: AppSpacing.md),
+              Row(
+                children: [
+                  const Icon(
+                    Icons.photo_camera_back_outlined,
+                    size: 18,
+                    color: AppColors.inkMuted,
+                  ),
+                  const SizedBox(width: AppSpacing.xs),
+                  Text(
+                    'Bukti pembayaran ${proofRequired ? '(wajib)' : '(opsional)'}',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      color: proofRequired ? AppColors.danger : null,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              if (draft.proofPath == null)
+                Wrap(
+                  spacing: AppSpacing.xs,
+                  runSpacing: AppSpacing.xs,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: () => onPickProof(ImageSource.camera),
+                      icon: const Icon(Icons.photo_camera_outlined),
+                      label: const Text('Kamera'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () => onPickProof(ImageSource.gallery),
+                      icon: const Icon(Icons.photo_library_outlined),
+                      label: const Text('Galeri'),
+                    ),
+                  ],
+                )
+              else ...[
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(AppRadius.sm),
+                  child: Image.file(
+                    File(draft.proofPath!),
+                    height: 120,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) => Container(
+                      height: 120,
+                      alignment: Alignment.center,
+                      color: AppColors.forestSoft,
+                      child: const Text('Foto tidak ditemukan'),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Row(
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final source = await _chooseProofSource(context);
+                        if (source != null) onPickProof(source);
+                      },
+                      icon: const Icon(Icons.autorenew_rounded),
+                      label: const Text('Ganti'),
+                    ),
+                    const SizedBox(width: AppSpacing.xs),
+                    TextButton.icon(
+                      onPressed: onRemoveProof,
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppColors.danger,
+                      ),
+                      icon: const Icon(Icons.delete_outline_rounded),
+                      label: const Text('Hapus'),
+                    ),
+                  ],
+                ),
+              ],
+              Text(
+                proofRequired
+                    ? 'Foto disimpan privat dan diunggah otomatis. Wajib '
+                          'dilampirkan sebelum checkout.'
+                    : 'Foto disimpan privat dan diunggah otomatis. Tidak wajib.',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: AppColors.inkMuted),
+              ),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<ImageSource?> _chooseProofSource(BuildContext context) {
+    return showModalBottomSheet<ImageSource>(
+      context: context,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_camera_outlined),
+              title: const Text('Ambil dari kamera'),
+              onTap: () => Navigator.of(context).pop(ImageSource.camera),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Pilih dari galeri'),
+              onTap: () => Navigator.of(context).pop(ImageSource.gallery),
+            ),
           ],
         ),
       ),

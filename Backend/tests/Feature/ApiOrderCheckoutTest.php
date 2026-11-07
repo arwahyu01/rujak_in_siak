@@ -66,7 +66,12 @@ class ApiOrderCheckoutTest extends TestCase
             'order_uuid' => $orderUuid,
             'base_version' => 4,
             'payments' => [
-                ['method' => SalePayment::METHOD_CASH, 'amount' => 20000, 'tendered_amount' => 25000],
+                [
+                    'method' => SalePayment::METHOD_CASH,
+                    'amount' => 20000,
+                    'tendered_amount' => 25000,
+                    'idempotency_key' => 'payment-1',
+                ],
             ],
         ];
 
@@ -78,7 +83,8 @@ class ApiOrderCheckoutTest extends TestCase
             ->assertJsonPath('data.lifecycle_status', Sale::LIFECYCLE_FINALIZED)
             ->assertJsonPath('data.payment_status', Sale::PAYMENT_PAID)
             ->assertJsonPath('data.confirmed_amount', 20000)
-            ->assertJsonPath('data.payments.0.change_amount', 5000);
+            ->assertJsonPath('data.payments.0.change_amount', 5000)
+            ->assertJsonPath('data.payments.0.idempotency_key', 'payment-1');
 
         $saleUuid = $checkout->json('data.uuid');
         $receipt = $checkout->json('data.receipt_number');
@@ -123,11 +129,10 @@ class ApiOrderCheckoutTest extends TestCase
         $this->assertSame(0, Sale::query()->count());
     }
 
-    public function test_non_cash_payment_requires_a_different_verifier_and_blocks_void(): void
+    public function test_owner_non_cash_checkout_is_confirmed_immediately(): void
     {
         $this->openShift($this->owner);
         $product = $this->makeProduct(15000);
-        $supervisor = $this->makeUser('supervisor@rujak.test', 'supervisor', 'supervisor');
         Sanctum::actingAs($this->owner, ['api']);
 
         $orderUuid = $this->postJson('/api/v1/orders', [
@@ -143,6 +148,40 @@ class ApiOrderCheckoutTest extends TestCase
         ], $this->headers($this->owner));
 
         $checkout->assertCreated()
+            ->assertJsonPath('data.payment_status', Sale::PAYMENT_PAID)
+            ->assertJsonPath('data.confirmed_amount', 15000)
+            ->assertJsonPath('data.awaiting_verification_amount', 0)
+            ->assertJsonPath('data.outstanding_amount', 0)
+            ->assertJsonPath('data.payments.0.status', SalePayment::STATUS_CONFIRMED);
+
+        $payment = SalePayment::query()->where('uuid', $checkout->json('data.payments.0.uuid'))->firstOrFail();
+        $this->assertSame($this->owner->id, (int) $payment->recorded_by);
+        $this->assertSame($this->owner->id, (int) $payment->verified_by);
+        $this->assertSame(15000, (int) $payment->verified_amount);
+        $this->assertNotNull($payment->verified_at);
+    }
+
+    public function test_non_cash_payment_requires_a_different_verifier_and_blocks_void(): void
+    {
+        $admin = $this->makeUser('admin@rujak.test', 'admin', 'admin');
+        $this->openShift($admin);
+        $product = $this->makeProduct(15000);
+        $supervisor = $this->makeUser('supervisor@rujak.test', 'supervisor', 'supervisor');
+        Sanctum::actingAs($admin, ['api']);
+
+        $orderUuid = $this->postJson('/api/v1/orders', [
+            'items' => [['product_uuid' => $product->uuid, 'quantity' => 1]],
+        ], $this->headers($admin))->json('data.uuid');
+
+        $checkout = $this->postJson('/api/v1/sales/checkout', [
+            'order_uuid' => $orderUuid,
+            'base_version' => 1,
+            'payments' => [
+                ['method' => SalePayment::METHOD_QRIS, 'amount' => 15000, 'provider_reference' => 'QR-1'],
+            ],
+        ], $this->headers($admin));
+
+        $checkout->assertCreated()
             ->assertJsonPath('data.payment_status', Sale::PAYMENT_AWAITING_VERIFICATION)
             ->assertJsonPath('data.awaiting_verification_amount', 15000);
 
@@ -151,7 +190,7 @@ class ApiOrderCheckoutTest extends TestCase
 
         $this->postJson('/api/v1/payments/'.$paymentUuid.'/verify', [
             'verified_amount' => 15000,
-        ], $this->headers($this->owner))->assertForbidden();
+        ], $this->headers($admin))->assertForbidden();
 
         $this->assertTrue($supervisor->hasPermission('payments.verify'), 'Supervisor must hold payments.verify');
 

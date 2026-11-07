@@ -94,6 +94,9 @@ class LocalPaymentDraft {
     this.tenderedAmount,
     this.providerReference,
     this.notes,
+    this.idempotencyKey,
+    this.proofPath,
+    this.ownerConfirmed = false,
   });
 
   final String method;
@@ -101,6 +104,9 @@ class LocalPaymentDraft {
   final int? tenderedAmount;
   final String? providerReference;
   final String? notes;
+  final String? idempotencyKey;
+  final String? proofPath;
+  final bool ownerConfirmed;
 
   bool get isCash => method == 'cash';
 
@@ -110,7 +116,8 @@ class LocalPaymentDraft {
     return tendered > amount ? tendered - amount : 0;
   }
 
-  String get status => isCash ? 'confirmed' : 'awaiting_verification';
+  String get status =>
+      isCash || ownerConfirmed ? 'confirmed' : 'awaiting_verification';
 
   Map<String, dynamic> toCheckoutJson(String idempotencyKey) => {
     'method': method,

@@ -17,6 +17,7 @@ import Modal from '@/Components/UI/Modal';
 import InputField from '@/Components/UI/InputField';
 import TextareaField from '@/Components/UI/TextareaField';
 import EmptyState from '@/Components/UI/EmptyState';
+import PaymentProofImage from '@/Components/UI/PaymentProofImage';
 import {
     formatDateTime,
     formatMoney,
@@ -233,8 +234,16 @@ export default function SaleShow({ sale, auditTrail, abilities, voidBlockedReaso
                                                 </p>
                                                 {payment.provider_reference ? (
                                                     <p className="text-xs text-gray-500 dark:text-gray-400">
-                                                        Referensi: <span className="font-medium">{payment.provider_reference}</span>
+                                                        Catatan: <span className="font-medium">{payment.provider_reference}</span>
                                                     </p>
+                                                ) : null}
+                                                {payment.proof_required && !payment.has_proof ? (
+                                                    <p className="mt-1 text-xs font-bold text-red-600 dark:text-red-400">
+                                                        Bukti pembayaran wajib diunggah sebelum verifikasi.
+                                                    </p>
+                                                ) : null}
+                                                {payment.has_proof ? (
+                                                    <PaymentProofImage paymentId={payment.id} className="h-24 w-24" />
                                                 ) : null}
                                             </div>
                                             <div className="text-right">

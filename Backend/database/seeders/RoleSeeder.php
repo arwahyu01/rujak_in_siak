@@ -99,7 +99,6 @@ class RoleSeeder extends Seeder
                 'sales.checkout',
                 'payments.record',
                 'shifts.view',
-                'shifts.manage',
             ])
             ->pluck('id');
 

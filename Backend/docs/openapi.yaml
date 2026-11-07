@@ -200,11 +200,11 @@ paths:
           application/json:
             schema:
               type: object
-              required: [uuid, name, terminal_code]
+              required: [uuid, name]
               properties:
                 uuid: { type: string, format: uuid }
                 name: { type: string, maxLength: 120 }
-                terminal_code: { type: string, maxLength: 20, pattern: '^[A-Za-z0-9_-]+$' }
+                terminal_code: { type: string, maxLength: 20, pattern: '^[A-Za-z0-9_-]+$', description: 'Optional. Assigned automatically as POS1, POS2, etc. when omitted.' }
                 platform: { type: string, enum: [android, ios, web] }
                 app_version: { type: string, maxLength: 40 }
                 device_fingerprint: { type: string, maxLength: 191 }
@@ -747,6 +747,60 @@ paths:
                   data: { $ref: '#/components/schemas/SalePayment' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /payments/{uuid}/proof:
+    post:
+      tags: [Payments]
+      summary: Upload an optional proof of payment
+      description: Only applies to non-cash payments. Replacing a proof removes the previous file.
+      parameters:
+        - $ref: '#/components/parameters/UuidPath'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [proof]
+              properties:
+                proof:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Proof uploaded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/SalePayment' }
+        '200':
+          description: Identical proof already stored or proof replaced
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/SalePayment' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    get:
+      tags: [Payments]
+      summary: Download the proof of payment
+      parameters:
+        - $ref: '#/components/parameters/UuidPath'
+      responses:
+        '200':
+          description: Private image bytes
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+            image/png:
+              schema: { type: string, format: binary }
+            image/webp:
+              schema: { type: string, format: binary }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /payments/{uuid}/verify:
     post:
       tags: [Payments]
@@ -763,7 +817,7 @@ paths:
               required: [verified_amount]
               properties:
                 verified_amount: { type: integer, minimum: 1 }
-                provider_reference: { type: string, maxLength: 200 }
+                provider_reference: { type: string, maxLength: 200, description: 'Optional free-text note, e.g. customer name.' }
                 verification_note: { type: string, maxLength: 500 }
                 correction_reason: { type: string, maxLength: 500 }
       responses:
@@ -808,13 +862,14 @@ paths:
   /shifts:
     get:
       tags: [Shifts]
-      summary: List shifts for the device outlet
+      summary: List outlet shifts visible from the device outlet
       parameters:
         - name: status
           in: query
-          schema: { type: string }
+          schema: { type: string, enum: [open, closing, closed_pending_sync, closed_confirmed, closed_sync_exception] }
         - name: active_only
           in: query
+          description: Include only `open` and `closing` shifts.
           schema: { type: boolean }
         - name: per_page
           in: query
@@ -832,10 +887,38 @@ paths:
                     items: { $ref: '#/components/schemas/Shift' }
                   meta: { $ref: '#/components/schemas/Pagination' }
 
+  /shifts/active:
+    get:
+      tags: [Shifts]
+      summary: Get the single active outlet shift
+      description: |
+        Returns the `open` or `closing` shift for the device outlet, regardless
+        of which user or device opened it. Every registered device in the outlet
+        receives the same shift UUID and opener metadata. Responds `200` with
+        `data: null` when the outlet has no active shift. Calling this endpoint
+        registers the device as a shift participant.
+      responses:
+        '200':
+          description: Active shift or null
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    allOf:
+                      - $ref: '#/components/schemas/Shift'
+                    nullable: true
+
   /shifts/open:
     post:
       tags: [Shifts]
-      summary: Open a shift for the current device
+      summary: Open the outlet shift
+      description: |
+        Requires `shifts.manage`. An outlet may have at most one `open` or
+        `closing` shift at a time. A second attempt is rejected with
+        `SHIFT_ALREADY_OPEN` (including concurrent requests), and the conflict
+        details expose the currently active shift UUID and status.
       requestBody:
         required: true
         content:
@@ -860,8 +943,22 @@ paths:
   /shifts/close:
     post:
       tags: [Shifts]
-      summary: Close a shift and create its immutable closing snapshot
-      description: Fails with `SHIFT_HAS_HELD_ORDERS` while held orders remain.
+      summary: Request shift close and checkpoint the closing device
+      description: |
+        Requires `shifts.manage`. The close is two-phase:
+
+        1. The first call moves the shift from `open` to `closing`, increments
+           `close_epoch`, records the closer user/device and actual cash, and
+           registers the calling device as a participant.
+        2. The shift is finalized (status `closed_confirmed` and an immutable
+           closing snapshot) only once every participant device has a
+           checkpoint for the current `close_epoch` and has no unresolved sync
+           events. Until then the response keeps the `closing` status and
+           `sync.pending_devices` lists the devices that still block closure.
+
+        Fails with `SHIFT_HAS_HELD_ORDERS` while held orders remain. The
+        `pending_sync_count` sent by the closing device only proves that
+        device's outbox state; it never represents other devices.
       requestBody:
         required: true
         content:
@@ -878,7 +975,43 @@ paths:
                 closed_at: { type: string, format: date-time }
       responses:
         '200':
-          description: Closed shift
+          description: Shift in `closing` state, or finalized with a snapshot when all devices are clean
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Shift' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /shifts/{uuid}/sync-checkpoint:
+    post:
+      tags: [Shifts]
+      summary: Acknowledge device sync for the current close epoch
+      description: |
+        Requires `shifts.view` and a registered device in the shift outlet.
+        Marks the calling device as checkpointed for the shift's current
+        `close_epoch` after verifying the device has no unresolved sync events.
+        When the last participant checks in, the shift is finalized with an
+        immutable closing snapshot. Blocked when the device still has an
+        undrained outbox (`SHIFT_DEVICE_OUTBOX_NOT_DRAINED`) or unresolved
+        events (`SHIFT_DEVICE_SYNC_PENDING`). A stale `close_epoch` is rejected
+        with `SHIFT_CLOSE_EPOCH_CHANGED`.
+      parameters:
+        - $ref: '#/components/parameters/UuidPath'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                close_epoch: { type: integer, minimum: 0 }
+                pending_outbox_count: { type: integer, minimum: 0 }
+                last_sequence: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: Shift after checkpoint, possibly finalized
           content:
             application/json:
               schema:
@@ -890,7 +1023,7 @@ paths:
   /shifts/{uuid}:
     get:
       tags: [Shifts]
-      summary: Show a shift with snapshot and cash movements
+      summary: Show a shift with server summary, sync status, snapshot, and cash movements
       parameters:
         - $ref: '#/components/parameters/UuidPath'
       responses:
@@ -908,6 +1041,10 @@ paths:
     post:
       tags: [Shifts]
       summary: Record a cash in/out movement on an open shift
+      description: |
+        Requires `shifts.manage`. Rejected with `SHIFT_CLOSING` once the shift
+        has entered the closing phase. The movement records the acting user as
+        `created_by` and the acting device.
       parameters:
         - $ref: '#/components/parameters/UuidPath'
       requestBody:
@@ -935,8 +1072,14 @@ paths:
   /shifts/{uuid}/reconcile:
     post:
       tags: [Shifts]
-      summary: Reconcile a closed shift
-      description: Requires a resolution note. Unresolved sync events require `force`.
+      summary: Reconcile a shift that is waiting for sync or in a sync exception
+      description: |
+        Requires `shifts.reconcile` and an existing closing snapshot. Applies to
+        `closed_pending_sync` and `closed_sync_exception` only; `closed_confirmed`
+        shifts are rejected. Requires a resolution note. If unresolved events
+        from participant devices remain, the call is rejected unless `force` is
+        set; forcing marks the shift `closed_sync_exception` rather than
+        confirming a complete close. The immutable snapshot is never rewritten.
       parameters:
         - $ref: '#/components/parameters/UuidPath'
       requestBody:
@@ -1505,7 +1648,7 @@ components:
         method: { type: string, enum: [cash, qris, transfer, ewallet] }
         amount: { type: integer, minimum: 1 }
         tendered_amount: { type: integer, minimum: 0, description: Required for cash to be at least `amount` }
-        provider_reference: { type: string, maxLength: 200 }
+        provider_reference: { type: string, maxLength: 200, description: 'Optional free-text note, e.g. customer name or transaction reference.' }
         idempotency_key: { type: string, maxLength: 120 }
         notes: { type: string, maxLength: 500 }
 
@@ -1522,9 +1665,12 @@ components:
         verified_amount: { type: integer, nullable: true }
         status: { type: string, enum: [confirmed, awaiting_verification, rejected] }
         origin: { type: string, enum: [online, offline] }
-        provider_reference: { type: string, nullable: true }
+        provider_reference: { type: string, nullable: true, description: 'Optional free-text note captured with the payment.' }
         notes: { type: string, nullable: true }
+        idempotency_key: { type: string, nullable: true }
+        proof_required: { type: boolean, description: 'True when the business requires proof for this non-cash payment; such a payment cannot be verified before proof is uploaded.' }
         has_proof: { type: boolean }
+        proof_uploaded_at: { type: string, format: date-time, nullable: true }
         recorded_by:
           type: object
           nullable: true
@@ -1594,9 +1740,14 @@ components:
 
     Shift:
       type: object
+      description: |
+        Outlet-scoped shift. `is_active` is true for `open` and `closing`.
+        Transactions are only accepted while the status is `open`.
       properties:
         uuid: { type: string, format: uuid }
-        status: { type: string, enum: [open, closed_pending_sync, closed_confirmed] }
+        status: { type: string, enum: [open, closing, closed_pending_sync, closed_confirmed, closed_sync_exception] }
+        is_active: { type: boolean }
+        is_closing: { type: boolean }
         opening_cash: { type: integer }
         cash_tendered: { type: integer }
         cash_change: { type: integer }
@@ -1606,16 +1757,34 @@ components:
         expected_cash: { type: integer }
         actual_cash: { type: integer, nullable: true }
         variance: { type: integer, nullable: true }
+        close_actual_cash: { type: integer, nullable: true }
         confirmed_noncash: { type: integer }
         awaiting_verification_amount: { type: integer }
         local_transaction_count: { type: integer }
         pending_sync_count: { type: integer }
         local_event_sequence: { type: integer, nullable: true }
+        close_epoch: { type: integer, description: Incremented when a close is requested; checkpoints must match it. }
         opening_notes: { type: string, nullable: true }
         closing_notes: { type: string, nullable: true }
         opened_at: { type: string, format: date-time, nullable: true }
+        closing_started_at: { type: string, format: date-time, nullable: true }
         closed_at: { type: string, format: date-time, nullable: true }
         approved_at: { type: string, format: date-time, nullable: true }
+        cashier: { $ref: '#/components/schemas/ShiftActor', description: User who opened the shift (legacy alias). }
+        opened_by: { $ref: '#/components/schemas/ShiftActor', description: User who opened the shift. Never overwritten by the closer. }
+        device: { $ref: '#/components/schemas/ShiftDeviceRef', description: Device that opened the shift (legacy alias). }
+        opened_device: { $ref: '#/components/schemas/ShiftDeviceRef', description: Device that opened the shift. }
+        outlet:
+          type: object
+          nullable: true
+          properties:
+            uuid: { type: string, format: uuid }
+            name: { type: string }
+            code: { type: string, nullable: true }
+        closing_requested_by: { $ref: '#/components/schemas/ShiftActor', description: User who requested the close. }
+        closing_requested_device: { $ref: '#/components/schemas/ShiftDeviceRef', description: Device that requested the close. }
+        closed_by: { $ref: '#/components/schemas/ShiftActor', description: User who finalized the close. }
+        closed_device: { $ref: '#/components/schemas/ShiftDeviceRef', description: Device that finalized the close. }
         cash_movements:
           type: array
           items:
@@ -1625,8 +1794,49 @@ components:
               type: { type: string, enum: [in, out] }
               amount: { type: integer }
               reason: { type: string, nullable: true }
-              created_by: { type: string, nullable: true }
+              created_by: { type: string, nullable: true, description: Name of the acting user. }
+              device_uuid: { type: string, format: uuid, nullable: true }
               occurred_at: { type: string, format: date-time, nullable: true }
+        summary:
+          type: object
+          nullable: true
+          description: Server-authoritative totals across every device in the shift.
+          properties:
+            opening_cash: { type: integer }
+            cash_tendered: { type: integer }
+            cash_change: { type: integer }
+            cash_in: { type: integer }
+            cash_out: { type: integer }
+            cash_refund: { type: integer }
+            expected_cash: { type: integer }
+            confirmed_noncash: { type: integer }
+            awaiting_verification_amount: { type: integer }
+            local_transaction_count: { type: integer }
+            sale_total: { type: integer }
+            confirmed_amount: { type: integer }
+            refunded_amount: { type: integer }
+        sync:
+          type: object
+          nullable: true
+          description: Checkpoint evidence. Never derived from `last_seen_at`.
+          properties:
+            close_epoch: { type: integer }
+            closing_started_at: { type: string, format: date-time, nullable: true }
+            is_closing: { type: boolean }
+            participant_count: { type: integer }
+            pending_device_count: { type: integer }
+            can_finalize: { type: boolean }
+            participants:
+              type: array
+              items: { $ref: '#/components/schemas/ShiftParticipant' }
+            pending_devices:
+              type: array
+              items: { $ref: '#/components/schemas/ShiftParticipant' }
+        pending_devices:
+          type: array
+          description: Convenience copy of `sync.pending_devices`.
+          items: { $ref: '#/components/schemas/ShiftParticipant' }
+        can_finalize: { type: boolean }
         closing_snapshot:
           type: object
           nullable: true
@@ -1645,10 +1855,49 @@ components:
             awaiting_verification_amount: { type: integer }
             local_transaction_count: { type: integer }
             pending_sync_count: { type: integer }
+            device_count: { type: integer }
+            synced_device_count: { type: integer }
+            checkpoint_epoch: { type: integer }
             local_event_sequence: { type: integer, nullable: true }
             closing_notes: { type: string, nullable: true }
+            closed_by: { $ref: '#/components/schemas/ShiftActor' }
+            closed_device: { $ref: '#/components/schemas/ShiftDeviceRef' }
             snapshot: { type: object }
             closed_at: { type: string, format: date-time, nullable: true }
+            finalized_at: { type: string, format: date-time, nullable: true }
+
+    ShiftActor:
+      type: object
+      nullable: true
+      properties:
+        uuid: { type: string, format: uuid }
+        name: { type: string }
+
+    ShiftDeviceRef:
+      type: object
+      nullable: true
+      properties:
+        uuid: { type: string, format: uuid }
+        terminal_code: { type: string, nullable: true }
+        name: { type: string, nullable: true }
+
+    ShiftParticipant:
+      type: object
+      properties:
+        device_uuid: { type: string, format: uuid, nullable: true }
+        device_name: { type: string, nullable: true }
+        terminal_code: { type: string, nullable: true }
+        user_name: { type: string, nullable: true }
+        requires_checkpoint: { type: boolean }
+        acked: { type: boolean }
+        last_ack_epoch: { type: integer }
+        last_sequence: { type: integer, nullable: true }
+        unresolved_events: { type: integer }
+        unresolved_event_samples:
+          type: array
+          items: { type: object }
+        last_seen_at: { type: string, format: date-time, nullable: true }
+        acknowledged_at: { type: string, format: date-time, nullable: true }
 
     SyncPushRequest:
       type: object

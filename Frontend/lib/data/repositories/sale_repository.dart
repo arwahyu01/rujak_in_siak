@@ -13,6 +13,8 @@ import '../models/auth.dart';
 import '../models/sale.dart';
 import '../models/shift.dart';
 import 'bootstrap_repository.dart';
+import '../services/payment_proof_queue.dart';
+import '../services/proof_matcher.dart';
 import '../services/receipt_number_service.dart';
 import '../sync/outbox_writer.dart';
 import '../sync/sync_repository.dart';
@@ -38,7 +40,13 @@ class CheckoutOutcome {
 }
 
 class SaleRepository {
-  SaleRepository(this._db, this._api, this._outbox, this._receipts);
+  SaleRepository(
+    this._db,
+    this._api,
+    this._outbox,
+    this._receipts,
+    this._proofs,
+  );
 
   static const _allowedMethods = {'cash', 'qris', 'transfer', 'ewallet'};
 
@@ -46,6 +54,7 @@ class SaleRepository {
   final ApiClient _api;
   final OutboxWriter _outbox;
   final ReceiptNumberService _receipts;
+  final PaymentProofQueue _proofs;
 
   Future<CheckoutOutcome> checkout({
     required CartState cart,
@@ -66,7 +75,13 @@ class SaleRepository {
         'Shift tidak aktif. Buka shift sebelum checkout.',
       );
     }
-    _validatePayments(payments, pricing.total);
+    _validatePayments(
+      payments,
+      pricing.total,
+      requireProof:
+          (snapshot.data?.nonCashProofRequired ?? false) &&
+          !session.user.isOwner,
+    );
 
     final config = snapshot.data?.pricingConfig ?? const PricingConfig();
     final goOffline = forceOffline || !shift.synced;
@@ -149,14 +164,18 @@ class SaleRepository {
 
     final now = DateTime.now();
     final checkoutKey = newUuid();
+    final paymentKeys = [
+      for (final payment in payments) payment.idempotencyKey ?? newUuid(),
+    ];
     final body = {
       'order_uuid': orderUuid,
       'base_version': orderVersion ?? 1,
       if (cart.notes != null && cart.notes!.isNotEmpty) 'notes': cart.notes,
       'client_created_at': now.toIso8601String(),
-      'payments': payments
-          .map((payment) => payment.toCheckoutJson(newUuid()))
-          .toList(growable: false),
+      'payments': [
+        for (var index = 0; index < payments.length; index++)
+          payments[index].toCheckoutJson(paymentKeys[index]),
+      ],
     };
 
     try {
@@ -166,7 +185,8 @@ class SaleRepository {
         headers: {'Idempotency-Key': checkoutKey},
       );
       final sale = SaleRecord.fromServer(asMap(result.data));
-      final printQueued = await _saveAndQueue(sale);
+      final proofs = _proofSeeds(payments, paymentKeys, sale);
+      final printQueued = await _saveAndQueue(sale, proofs: proofs);
       await _discardHeldOrder(cart.heldOrderUuid);
       return CheckoutOutcome(
         sale: sale,
@@ -179,7 +199,8 @@ class SaleRepository {
         if (saleUuid != null && saleUuid.isNotEmpty) {
           final existing = await fetchRemote(saleUuid);
           if (existing != null) {
-            final printQueued = await _saveAndQueue(existing);
+            final proofs = _proofSeeds(payments, paymentKeys, existing);
+            final printQueued = await _saveAndQueue(existing, proofs: proofs);
             await _discardHeldOrder(cart.heldOrderUuid);
             return CheckoutOutcome(
               sale: existing,
@@ -216,7 +237,11 @@ class SaleRepository {
     }
   }
 
-  void _validatePayments(List<LocalPaymentDraft> payments, int total) {
+  void _validatePayments(
+    List<LocalPaymentDraft> payments,
+    int total, {
+    required bool requireProof,
+  }) {
     if (total <= 0) {
       if (payments.isNotEmpty) {
         throw const AppException(
@@ -255,11 +280,12 @@ class SaleRepository {
             'Uang tunai diterima kurang dari nominal pembayaran.',
           );
         }
-      } else if (payment.providerReference == null ||
-          payment.providerReference!.trim().isEmpty) {
+      } else if (requireProof &&
+          (payment.proofPath == null || payment.proofPath!.isEmpty)) {
         throw const AppException(
-          'PROVIDER_REFERENCE_REQUIRED',
-          'Referensi pembayaran non-tunai wajib diisi.',
+          'PAYMENT_PROOF_REQUIRED',
+          'Foto bukti pembayaran wajib dilampirkan untuk pembayaran '
+          'non-tunai sesuai pengaturan Owner.',
         );
       }
       sum += payment.amount;
@@ -421,10 +447,10 @@ class SaleRepository {
 
     final paymentPayloads = <Map<String, dynamic>>[];
     final confirmed = payments
-        .where((payment) => payment.isCash)
+        .where((payment) => payment.status == 'confirmed')
         .fold<int>(0, (sum, payment) => sum + payment.amount);
     final awaiting = payments
-        .where((payment) => !payment.isCash)
+        .where((payment) => payment.status == 'awaiting_verification')
         .fold<int>(0, (sum, payment) => sum + payment.amount);
     final paymentStatus = _paymentStatus(
       total: pricing.total,
@@ -433,10 +459,15 @@ class SaleRepository {
     );
     final outstanding = (pricing.total - confirmed).clamp(0, pricing.total);
 
-    for (final payment in payments) {
+    final paymentUuids = [for (final _ in payments) newUuid()];
+    final paymentKeys = [
+      for (final payment in payments) payment.idempotencyKey ?? newUuid(),
+    ];
+    for (var index = 0; index < payments.length; index++) {
+      final payment = payments[index];
       paymentPayloads.add({
-        'payment_uuid': newUuid(),
-        'idempotency_key': newUuid(),
+        'payment_uuid': paymentUuids[index],
+        'idempotency_key': paymentKeys[index],
         'method': payment.method,
         'amount': payment.amount,
         'tendered_amount': payment.isCash
@@ -449,6 +480,16 @@ class SaleRepository {
         'recorded_at': now.toIso8601String(),
       });
     }
+    final proofSeeds = [
+      for (var index = 0; index < payments.length; index++)
+        if (!payments[index].isCash && payments[index].proofPath != null)
+          ProofUploadSeed(
+            saleUuid: saleUuid,
+            paymentUuid: paymentUuids[index],
+            idempotencyKey: paymentKeys[index],
+            localPath: payments[index].proofPath!,
+          ),
+    ];
 
     final sale = SaleRecord(
       uuid: saleUuid,
@@ -492,22 +533,23 @@ class SaleRepository {
             ),
           )
           .toList(growable: false),
-      payments: payments
-          .map(
-            (payment) => SalePaymentRecord(
-              method: payment.method,
-              amount: payment.amount,
-              tenderedAmount: payment.isCash
-                  ? payment.tenderedAmount ?? payment.amount
-                  : null,
-              changeAmount: payment.changeAmount,
-              status: payment.status,
-              providerReference: payment.providerReference,
-              notes: payment.notes,
-              recordedAt: now,
-            ),
-          )
-          .toList(growable: false),
+      payments: [
+        for (var index = 0; index < payments.length; index++)
+          SalePaymentRecord(
+            uuid: paymentUuids[index],
+            method: payments[index].method,
+            amount: payments[index].amount,
+            tenderedAmount: payments[index].isCash
+                ? payments[index].tenderedAmount ?? payments[index].amount
+                : null,
+            changeAmount: payments[index].changeAmount,
+            status: payments[index].status,
+            providerReference: payments[index].providerReference,
+            idempotencyKey: paymentKeys[index],
+            notes: payments[index].notes,
+            recordedAt: now,
+          ),
+      ],
     );
 
     await _db.transaction(() async {
@@ -564,6 +606,7 @@ class SaleRepository {
         synced: false,
         payments: paymentPayloads,
       );
+      await _proofs.enqueueAll(proofSeeds);
 
       await _outbox.append(
         eventId: newUuid(),
@@ -641,9 +684,24 @@ class SaleRepository {
     return CheckoutOutcome(sale: sale, offline: true, printQueued: printQueued);
   }
 
-  Future<bool> _saveAndQueue(SaleRecord sale) async {
+  List<ProofUploadSeed> _proofSeeds(
+    List<LocalPaymentDraft> drafts,
+    List<String> paymentKeys,
+    SaleRecord sale,
+  ) => matchProofUploads(
+    saleUuid: sale.uuid,
+    drafts: drafts,
+    paymentKeys: paymentKeys,
+    payments: sale.payments,
+  );
+
+  Future<bool> _saveAndQueue(
+    SaleRecord sale, {
+    List<ProofUploadSeed> proofs = const [],
+  }) async {
     await _db.transaction(() async {
       await _insertSale(sale, synced: true);
+      await _proofs.enqueueAll(proofs);
     });
     final terminal = _terminalCodeFromReceipt(sale.receiptNumber);
     if (terminal != null) {
@@ -808,15 +866,23 @@ class SaleRepository {
 
   Future<bool> _enqueuePrint(String saleUuid) async {
     try {
-      await _db
-          .into(_db.printJobs)
-          .insert(
-            PrintJobsCompanion.insert(
-              saleUuid: saleUuid,
-              createdAt: DateTime.now(),
-            ),
-          );
-      return true;
+      return await _db.transaction(() async {
+        final existing =
+            await (_db.select(_db.printJobs)
+                  ..where((row) => row.saleUuid.equals(saleUuid))
+                  ..limit(1))
+                .getSingleOrNull();
+        if (existing != null) return false;
+        await _db
+            .into(_db.printJobs)
+            .insert(
+              PrintJobsCompanion.insert(
+                saleUuid: saleUuid,
+                createdAt: DateTime.now(),
+              ),
+            );
+        return true;
+      });
     } catch (_) {
       return false;
     }

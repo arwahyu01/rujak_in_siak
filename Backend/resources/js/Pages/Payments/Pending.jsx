@@ -17,6 +17,7 @@ import Badge from '@/Components/UI/Badge';
 import Button from '@/Components/UI/Button';
 import EmptyState from '@/Components/UI/EmptyState';
 import Modal from '@/Components/UI/Modal';
+import PaymentProofImage from '@/Components/UI/PaymentProofImage';
 import InputField from '@/Components/UI/InputField';
 import SelectField from '@/Components/UI/SelectField';
 import TextareaField from '@/Components/UI/TextareaField';
@@ -178,7 +179,7 @@ export default function PaymentsPending({ payments, summary, recent, filters, se
                                 <th>Transaksi</th>
                                 <th>Metode</th>
                                 <th className="text-right">Nominal</th>
-                                <th>Referensi</th>
+                                <th>Catatan</th>
                                 <th>Pencatat</th>
                                 <th>Status</th>
                                 <th className="text-right">Aksi</th>
@@ -201,6 +202,14 @@ export default function PaymentsPending({ payments, summary, recent, filters, se
                                         <p className="truncate text-xs" title={payment.provider_reference || ''}>
                                             {payment.provider_reference || '—'}
                                         </p>
+                                        {payment.has_proof ? (
+                                            <PaymentProofImage paymentId={payment.id} className="h-16 w-16" />
+                                        ) : null}
+                                        {payment.proof_required && !payment.has_proof ? (
+                                            <p className="mt-1 text-[11px] font-bold text-red-600 dark:text-red-400">
+                                                Bukti wajib diunggah sebelum verifikasi.
+                                            </p>
+                                        ) : null}
                                     </td>
                                     <td>
                                         <p className="text-sm">{payment.recorded_by?.name || '—'}</p>
@@ -341,6 +350,13 @@ export default function PaymentsPending({ payments, summary, recent, filters, se
                             </div>
                         </div>
 
+                        {verifying.proof_required && !verifying.has_proof ? (
+                            <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
+                                Bukti pembayaran wajib diunggah terlebih dahulu. Minta kasir mengunggah bukti atau
+                                nonaktifkan kebijakan wajib bukti di Pengaturan Bisnis.
+                            </div>
+                        ) : null}
+
                         <InputField
                             id="verified_amount"
                             label="Nominal terverifikasi (Rp)"
@@ -354,11 +370,11 @@ export default function PaymentsPending({ payments, summary, recent, filters, se
                         />
                         <InputField
                             id="provider_reference"
-                            label="Referensi pembayaran / mutasi"
-                            required
+                            label="Catatan / referensi pembayaran (opsional)"
                             value={verifyForm.data.provider_reference}
                             onChange={(event) => verifyForm.setData('provider_reference', event.target.value)}
                             error={verifyForm.errors.provider_reference}
+                            hint="Boleh dikosongkan. Isi referensi transaksi atau catatan lain bila perlu."
                         />
                         <TextareaField
                             id="verification_note"

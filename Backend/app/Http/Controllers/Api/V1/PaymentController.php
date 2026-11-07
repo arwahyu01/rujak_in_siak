@@ -3,10 +3,12 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Actions\Payments\RejectPayment;
+use App\Actions\Payments\UploadPaymentProof;
 use App\Actions\Payments\VerifyPayment;
 use App\Exceptions\ApiException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Api\RejectPaymentRequest;
+use App\Http\Requests\Api\UploadPaymentProofRequest;
 use App\Http\Requests\Api\VerifyPaymentRequest;
 use App\Http\Resources\PaymentResource;
 use App\Models\Device;
@@ -14,6 +16,8 @@ use App\Models\SalePayment;
 use App\Support\ApiResponse;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class PaymentController extends Controller
 {
@@ -53,6 +57,31 @@ class PaymentController extends Controller
         $this->authorize('view', $model);
 
         return ApiResponse::data(new PaymentResource($this->loadPayment($model)));
+    }
+
+    public function uploadProof(
+        UploadPaymentProofRequest $request,
+        string $payment,
+        UploadPaymentProof $action,
+    ): JsonResponse {
+        $model = $this->resolvePayment($request, $payment);
+        $this->authorize('uploadProof', $model);
+
+        $result = $action->handle($model, $request->file('proof'), $request->user());
+        $result['payment']->refresh();
+
+        return ApiResponse::data(
+            new PaymentResource($this->loadPayment($result['payment'])),
+            $result['created'] ? 201 : 200,
+        );
+    }
+
+    public function proof(Request $request, string $payment): StreamedResponse
+    {
+        $model = $this->resolvePayment($request, $payment);
+        $this->authorize('view', $model);
+
+        return $this->streamProof($model);
     }
 
     public function verify(
@@ -101,6 +130,22 @@ class PaymentController extends Controller
     private function loadPayment(SalePayment $payment): SalePayment
     {
         return $payment->load(['sale', 'recordedBy', 'verifiedBy', 'rejectedBy', 'verificationLogs.actor']);
+    }
+
+    private function streamProof(SalePayment $payment): StreamedResponse
+    {
+        $disk = Storage::disk('local');
+        $path = $payment->proof_path;
+
+        if (! $path || ! $disk->exists($path)) {
+            throw ApiException::notFound('Bukti pembayaran tidak ditemukan.');
+        }
+
+        return $disk->response($path, null, [
+            'Content-Type' => $disk->mimeType($path) ?: 'application/octet-stream',
+            'Cache-Control' => 'private, max-age=300',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
     }
 
     private function device(Request $request): Device

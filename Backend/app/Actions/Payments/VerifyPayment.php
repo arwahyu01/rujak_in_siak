@@ -39,6 +39,12 @@ class VerifyPayment
                 ]);
             }
 
+            if ($payment->proof_required && ! $payment->proof_path) {
+                throw ValidationException::withMessages([
+                    'payment' => 'Bukti pembayaran wajib diunggah sebelum pembayaran ini diverifikasi.',
+                ]);
+            }
+
             $this->aggregator->recalculate($sale);
             $sale->refresh();
 

@@ -15,6 +15,7 @@ use App\Services\OrderSnapshot;
 use App\Services\PricingCalculator;
 use App\Services\ReceiptNumberService;
 use App\Services\SalePaymentAggregator;
+use App\Services\ShiftSyncCoordinator;
 use App\Services\SyncRecorder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -29,6 +30,7 @@ class CheckoutSale
         private readonly IdempotencyService $idempotency,
         private readonly AuditLogger $audit,
         private readonly SyncRecorder $sync,
+        private readonly ShiftSyncCoordinator $shifts,
     ) {}
 
     public function handle(
@@ -85,13 +87,28 @@ class CheckoutSale
             }
 
             $shift = Shift::query()->lockForUpdate()->find($order->shift_id);
-            if (! $shift || $shift->status !== Shift::STATUS_OPEN) {
+            if (! $shift) {
+                throw new ApiException('SHIFT_NOT_OPEN', 'Shift order tidak ditemukan. Buka shift baru sebelum checkout.', 422);
+            }
+
+            if ((int) $shift->business_id !== (int) $order->business_id
+                || (int) $shift->outlet_id !== (int) $order->outlet_id) {
+                throw ApiException::forbidden('Shift order bukan milik outlet transaksi.');
+            }
+
+            if ($shift->status === Shift::STATUS_CLOSING) {
+                throw ApiException::conflict(
+                    'SHIFT_CLOSING',
+                    'Shift outlet sedang ditutup. Checkout tidak dapat dilanjutkan hingga Owner menyelesaikan penutupan.',
+                    ['shift_uuid' => $shift->uuid],
+                );
+            }
+
+            if ($shift->status !== Shift::STATUS_OPEN) {
                 throw new ApiException('SHIFT_NOT_OPEN', 'Shift order tidak aktif. Buka shift baru sebelum checkout.', 422);
             }
 
-            if ((int) $shift->device_id !== (int) $device->id) {
-                throw ApiException::forbidden('Shift bukan milik perangkat ini.');
-            }
+            $this->shifts->markTransactionParticipant($shift, $device, $actor);
 
             if ($order->items->isEmpty()) {
                 throw new ApiException('ORDER_EMPTY', 'Order tidak memiliki item.', 422);
@@ -116,7 +133,12 @@ class CheckoutSale
                 (int) $order->transaction_discount_total,
             );
 
-            $payments = $this->validatePayments($data['payments'] ?? [], $calculated['total']);
+            $payments = $this->validatePayments(
+                $data['payments'] ?? [],
+                $calculated['total'],
+                $actor,
+                (bool) $order->business->non_cash_proof_required && ! $actor->isOwner(),
+            );
             $receiptNumber = $this->receipts->next($order->outlet, $device->terminal_code);
 
             $sale = Sale::create([
@@ -193,6 +215,7 @@ class CheckoutSale
                     'status' => $payment['status'],
                     'provider_reference' => $payment['provider_reference'],
                     'notes' => $payment['notes'],
+                    'proof_required' => $payment['proof_required'],
                     'origin' => 'online',
                     'recorded_by' => $actor->id,
                     'recorded_at' => now(),
@@ -289,7 +312,7 @@ class CheckoutSale
         });
     }
 
-    private function validatePayments(array $payments, int $total): array
+    private function validatePayments(array $payments, int $total, User $actor, bool $proofRequired): array
     {
         $validated = [];
         $sum = 0;
@@ -316,7 +339,9 @@ class CheckoutSale
                 throw new ApiException('PAYMENT_EXCEEDS_TOTAL', 'Total pembayaran melebihi nilai transaksi.', 422);
             }
 
-            if ($method === SalePayment::METHOD_CASH) {
+            $isCash = $method === SalePayment::METHOD_CASH;
+
+            if ($isCash) {
                 $tendered = (int) ($payment['tendered_amount'] ?? $amount);
                 if ($tendered < $amount) {
                     throw new ApiException('CASH_TENDERED_INSUFFICIENT', 'Uang tunai diterima kurang dari nominal pembayaran.', 422);
@@ -326,10 +351,9 @@ class CheckoutSale
             } else {
                 $tendered = null;
                 $change = 0;
-                $status = SalePayment::STATUS_AWAITING_VERIFICATION;
-                if (empty($payment['provider_reference'])) {
-                    throw new ApiException('PROVIDER_REFERENCE_REQUIRED', 'Referensi pembayaran non-tunai wajib diisi.', 422);
-                }
+                $status = $actor->isOwner()
+                    ? SalePayment::STATUS_CONFIRMED
+                    : SalePayment::STATUS_AWAITING_VERIFICATION;
             }
 
             $validated[] = [
@@ -342,6 +366,7 @@ class CheckoutSale
                 'status' => $status,
                 'provider_reference' => $payment['provider_reference'] ?? null,
                 'notes' => $payment['notes'] ?? null,
+                'proof_required' => ! $isCash && $proofRequired,
             ];
         }
 
@@ -378,6 +403,7 @@ class CheckoutSale
                 'change_amount' => (int) $payment->change_amount,
                 'status' => $payment->status,
                 'provider_reference' => $payment->provider_reference,
+                'proof_required' => (bool) $payment->proof_required,
             ])->all(),
         ];
     }

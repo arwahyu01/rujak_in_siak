@@ -9,8 +9,10 @@ use App\Http\Requests\Payments\VerifyPaymentRequest;
 use App\Models\SalePayment;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class PaymentController extends Controller
 {
@@ -20,7 +22,7 @@ class PaymentController extends Controller
 
         $businessId = $request->user()->business_id;
         $query = SalePayment::query()
-            ->with(['sale:id,receipt_number,total,payment_status,lifecycle_status,transacted_at', 'recordedBy:id,name'])
+            ->with(['sale:id,business_id,receipt_number,total,outstanding_amount,payment_status,lifecycle_status,transacted_at', 'recordedBy:id,name'])
             ->where('status', SalePayment::STATUS_AWAITING_VERIFICATION)
             ->whereHas('sale', fn ($q) => $q->where('business_id', $businessId))
             ->when(trim((string) $request->query('q')) !== '', function ($q) use ($request) {
@@ -61,6 +63,22 @@ class PaymentController extends Controller
             'recent' => $recent,
             'filters' => $request->only(['q', 'method']),
             'separationOfDuties' => true,
+        ]);
+    }
+
+    public function proof(Request $request, SalePayment $payment): StreamedResponse
+    {
+        $this->authorize('view', $payment);
+
+        $disk = Storage::disk('local');
+        $path = $payment->proof_path;
+
+        abort_if(! $path || ! $disk->exists($path), 404);
+
+        return $disk->response($path, null, [
+            'Content-Type' => $disk->mimeType($path) ?: 'application/octet-stream',
+            'Cache-Control' => 'private, max-age=300',
+            'X-Content-Type-Options' => 'nosniff',
         ]);
     }
 

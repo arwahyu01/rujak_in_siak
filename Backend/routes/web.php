@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AuditLogController;
 use App\Http\Controllers\Auth\AuthController;
+use App\Http\Controllers\BusinessSettingsController;
 use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\PaymentController;
@@ -70,6 +71,9 @@ Route::middleware(['auth', 'permission:admin.access'])->group(function () {
     Route::get('/payments/pending', [PaymentController::class, 'pending'])
         ->middleware('permission:payments.view_pending')
         ->name('payments.pending');
+    Route::get('/payments/{payment}/proof', [PaymentController::class, 'proof'])
+        ->middleware('permission:payments.view_pending')
+        ->name('payments.proof');
     Route::post('/payments/{payment}/verify', [PaymentController::class, 'verify'])
         ->middleware('permission:payments.verify')
         ->name('payments.verify');
@@ -111,6 +115,13 @@ Route::middleware(['auth', 'permission:admin.access'])->group(function () {
     Route::get('/audit-logs', [AuditLogController::class, 'index'])
         ->middleware('permission:audit.view')
         ->name('audit.index');
+
+    Route::get('/settings/business', [BusinessSettingsController::class, 'edit'])
+        ->middleware('permission:settings.manage')
+        ->name('settings.business.edit');
+    Route::put('/settings/business', [BusinessSettingsController::class, 'update'])
+        ->middleware('permission:settings.manage')
+        ->name('settings.business.update');
 
     Route::get('/sync', [SyncController::class, 'index'])
         ->middleware('permission:sync.view')

@@ -23,6 +23,7 @@ class Business extends Model
         'service_charge_enabled',
         'service_charge_rate_basis_points',
         'tax_includes_service_charge',
+        'non_cash_proof_required',
         'is_active',
     ];
 
@@ -32,6 +33,7 @@ class Business extends Model
             'tax_enabled' => 'boolean',
             'service_charge_enabled' => 'boolean',
             'tax_includes_service_charge' => 'boolean',
+            'non_cash_proof_required' => 'boolean',
             'is_active' => 'boolean',
         ];
     }

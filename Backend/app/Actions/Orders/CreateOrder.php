@@ -12,6 +12,7 @@ use App\Services\OrderItemBuilder;
 use App\Services\OrderNumberService;
 use App\Services\OrderSnapshot;
 use App\Services\PricingCalculator;
+use App\Services\ShiftSyncCoordinator;
 use App\Services\SyncRecorder;
 use App\Services\TableConflictGuard;
 use Illuminate\Support\Facades\DB;
@@ -26,6 +27,7 @@ class CreateOrder
         private readonly OrderSnapshot $snapshots,
         private readonly AuditLogger $audit,
         private readonly SyncRecorder $sync,
+        private readonly ShiftSyncCoordinator $shifts,
     ) {}
 
     public function handle(array $data, User $actor, Device $device): Order
@@ -37,15 +39,25 @@ class CreateOrder
             $shift = Shift::query()
                 ->where('business_id', $business->id)
                 ->where('outlet_id', $outlet->id)
-                ->where('device_id', $device->id)
-                ->where('user_id', $actor->id)
-                ->where('status', Shift::STATUS_OPEN)
+                ->whereIn('status', [Shift::STATUS_OPEN, Shift::STATUS_CLOSING])
                 ->lockForUpdate()
                 ->latest('opened_at')
                 ->first();
 
             if (! $shift) {
-                throw new ApiException('SHIFT_REQUIRED', 'Buka shift terlebih dahulu sebelum membuat order.', 422);
+                throw new ApiException(
+                    'SHIFT_REQUIRED',
+                    'Shift outlet belum dibuka. Minta Owner membuka shift terlebih dahulu.',
+                    422,
+                );
+            }
+
+            if ($shift->status === Shift::STATUS_CLOSING) {
+                throw ApiException::conflict(
+                    'SHIFT_CLOSING',
+                    'Shift outlet sedang ditutup. Tunggu hingga Owner menyelesaikan penutupan atau membuka shift baru.',
+                    ['shift_uuid' => $shift->uuid],
+                );
             }
 
             $builtItems = $this->items->build($data['items'], $business);
@@ -98,6 +110,8 @@ class CreateOrder
             ]);
 
             $this->persistItems($order, $builtItems, $calculated);
+
+            $this->shifts->markTransactionParticipant($shift, $device, $actor);
 
             $order->statusHistories()->create([
                 'from_status' => null,

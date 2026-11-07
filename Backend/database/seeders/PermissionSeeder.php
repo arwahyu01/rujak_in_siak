@@ -38,6 +38,7 @@ class PermissionSeeder extends Seeder
         'roles.manage' => ['Kelola peran dan hak akses', 'roles'],
         'audit.view' => ['Lihat audit log', 'audit'],
         'sync.view' => ['Lihat status sinkronisasi', 'sync'],
+        'settings.manage' => ['Kelola pengaturan bisnis', 'settings'],
         'admin.access' => ['Akses web back-office', 'admin'],
     ];
 

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import '../../../core/network/api_client.dart';
 import '../../../core/utils/json_utils.dart';
 
@@ -14,6 +16,9 @@ class PendingPayment {
     this.recordedByName,
     this.recordedByUuid,
     this.recordedAt,
+    this.hasProof = false,
+    this.proofRequired = false,
+    this.proofUploadedAt,
   });
 
   final String uuid;
@@ -27,6 +32,9 @@ class PendingPayment {
   final String? recordedByName;
   final String? recordedByUuid;
   final DateTime? recordedAt;
+  final bool hasProof;
+  final bool proofRequired;
+  final DateTime? proofUploadedAt;
 
   factory PendingPayment.fromJson(Map<String, dynamic> json) {
     final recordedBy = asMapOrNull(json['recorded_by']);
@@ -46,6 +54,9 @@ class PendingPayment {
           ? null
           : asStringOrNull(recordedBy['uuid']),
       recordedAt: asDate(json['recorded_at']),
+      hasProof: asBool(json['has_proof']),
+      proofRequired: asBool(json['proof_required']),
+      proofUploadedAt: asDate(json['proof_uploaded_at']),
     );
   }
 }
@@ -54,6 +65,7 @@ class PaymentApi {
   PaymentApi(this._api);
 
   final ApiClient _api;
+  final Map<String, Uint8List> _proofCache = {};
 
   Future<List<PendingPayment>> pending() async {
     final result = await _api.get(
@@ -81,9 +93,31 @@ class PaymentApi {
           'verification_note': note.trim(),
       },
     );
+    _proofCache.remove(uuid);
   }
 
   Future<void> reject(String uuid, {required String reason}) async {
     await _api.post('payments/$uuid/reject', body: {'reason': reason.trim()});
+    _proofCache.remove(uuid);
+  }
+
+  Future<void> uploadProof(String uuid, String filePath) async {
+    await _api.postMultipart(
+      'payments/$uuid/proof',
+      field: 'proof',
+      filePath: filePath,
+    );
+    _proofCache.remove(uuid);
+  }
+
+  Future<Uint8List> proof(String uuid) async {
+    final cached = _proofCache[uuid];
+    if (cached != null) return cached;
+    final bytes = await _api.getBytes('payments/$uuid/proof');
+    if (_proofCache.length >= 10) {
+      _proofCache.remove(_proofCache.keys.first);
+    }
+    _proofCache[uuid] = bytes;
+    return bytes;
   }
 }

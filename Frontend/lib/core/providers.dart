@@ -12,7 +12,9 @@ import '../data/repositories/shift_repository.dart';
 import '../features/payments/data/payment_api.dart';
 import '../features/reports/data/reports_api.dart';
 import '../features/sales/data/sales_api.dart';
+import '../data/services/payment_proof_queue.dart';
 import '../data/services/printer_service.dart';
+import '../data/services/proof_image_service.dart';
 import '../data/services/receipt_number_service.dart';
 import '../data/sync/outbox_writer.dart';
 import '../data/sync/sync_repository.dart';
@@ -60,12 +62,25 @@ final shiftRepositoryProvider = Provider<ShiftRepository>((ref) {
   );
 });
 
+final proofImageServiceProvider = Provider<ProofImageService>((ref) {
+  return ProofImageService();
+});
+
+final paymentProofQueueProvider = Provider<PaymentProofQueue>((ref) {
+  return PaymentProofQueue(
+    ref.watch(databaseProvider),
+    ref.watch(paymentApiProvider),
+    ref.watch(proofImageServiceProvider),
+  );
+});
+
 final saleRepositoryProvider = Provider<SaleRepository>((ref) {
   return SaleRepository(
     ref.watch(databaseProvider),
     ref.watch(apiClientProvider),
     ref.watch(outboxWriterProvider),
     ref.watch(receiptNumberServiceProvider),
+    ref.watch(paymentProofQueueProvider),
   );
 });
 

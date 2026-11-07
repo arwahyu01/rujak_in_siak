@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\HasUuid;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -10,6 +11,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class SalePayment extends Model
 {
     use HasUuid;
+
+    protected $hidden = ['proof_path', 'idempotency_key'];
+
+    protected $appends = ['has_proof'];
 
     public const METHOD_CASH = 'cash';
 
@@ -44,6 +49,9 @@ class SalePayment extends Model
         'provider_reference',
         'notes',
         'proof_path',
+        'proof_required',
+        'proof_uploaded_by',
+        'proof_uploaded_at',
         'origin',
         'recorded_by',
         'recorded_at',
@@ -61,10 +69,17 @@ class SalePayment extends Model
             'tendered_amount' => 'integer',
             'change_amount' => 'integer',
             'verified_amount' => 'integer',
+            'proof_required' => 'boolean',
             'recorded_at' => 'datetime',
             'verified_at' => 'datetime',
             'rejected_at' => 'datetime',
+            'proof_uploaded_at' => 'datetime',
         ];
+    }
+
+    protected function hasProof(): Attribute
+    {
+        return Attribute::get(fn (): bool => $this->proof_path !== null);
     }
 
     public function isCash(): bool

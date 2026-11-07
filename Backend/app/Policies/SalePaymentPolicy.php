@@ -18,6 +18,12 @@ class SalePaymentPolicy
             && $user->business_id === $payment->sale?->business_id;
     }
 
+    public function uploadProof(User $user, SalePayment $payment): bool
+    {
+        return $user->hasPermission('payments.record')
+            && $user->business_id === $payment->sale?->business_id;
+    }
+
     public function verify(User $user, SalePayment $payment): bool
     {
         return $user->hasPermission('payments.verify')

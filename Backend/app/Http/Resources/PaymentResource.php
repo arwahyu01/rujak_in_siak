@@ -22,7 +22,10 @@ class PaymentResource extends JsonResource
             'origin' => $this->origin,
             'provider_reference' => $this->provider_reference,
             'notes' => $this->notes,
+            'idempotency_key' => $this->idempotency_key,
             'has_proof' => $this->proof_path !== null,
+            'proof_required' => (bool) $this->proof_required,
+            'proof_uploaded_at' => $this->proof_uploaded_at?->toIso8601String(),
             'recorded_by' => $this->whenLoaded('recordedBy', fn () => $this->recordedBy ? [
                 'uuid' => $this->recordedBy->uuid,
                 'name' => $this->recordedBy->name,

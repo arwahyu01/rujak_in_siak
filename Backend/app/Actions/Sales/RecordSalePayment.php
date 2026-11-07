@@ -57,10 +57,11 @@ class RecordSalePayment
             if ($isCash && $tendered < $amount) {
                 throw new ApiException('CASH_TENDERED_INSUFFICIENT', 'Uang tunai diterima kurang dari nominal pembayaran.', 422);
             }
-            if (! $isCash && empty($data['provider_reference'])) {
-                throw new ApiException('PROVIDER_REFERENCE_REQUIRED', 'Referensi pembayaran non-tunai wajib diisi.', 422);
-            }
 
+            $confirmed = $isCash || $actor->isOwner();
+            $proofRequired = ! $isCash
+                && ! $actor->isOwner()
+                && (bool) $actor->business?->non_cash_proof_required;
             $payment = $sale->payments()->create([
                 'uuid' => (string) Str::uuid(),
                 'idempotency_key' => $idempotencyKey,
@@ -68,15 +69,18 @@ class RecordSalePayment
                 'amount' => $amount,
                 'tendered_amount' => $tendered,
                 'change_amount' => $isCash ? $tendered - $amount : 0,
-                'verified_amount' => $isCash ? $amount : null,
-                'status' => $isCash ? SalePayment::STATUS_CONFIRMED : SalePayment::STATUS_AWAITING_VERIFICATION,
+                'verified_amount' => $confirmed ? $amount : null,
+                'status' => $confirmed
+                    ? SalePayment::STATUS_CONFIRMED
+                    : SalePayment::STATUS_AWAITING_VERIFICATION,
                 'provider_reference' => $data['provider_reference'] ?? null,
                 'notes' => $data['notes'] ?? null,
+                'proof_required' => $proofRequired,
                 'origin' => 'online',
                 'recorded_by' => $actor->id,
                 'recorded_at' => now(),
-                'verified_by' => $isCash ? $actor->id : null,
-                'verified_at' => $isCash ? now() : null,
+                'verified_by' => $confirmed ? $actor->id : null,
+                'verified_at' => $confirmed ? now() : null,
             ]);
 
             $sale = $this->aggregator->recalculate($sale);
@@ -105,6 +109,7 @@ class RecordSalePayment
                     'change_amount' => (int) $payment->change_amount,
                     'status' => $payment->status,
                     'provider_reference' => $payment->provider_reference,
+                    'proof_required' => (bool) $payment->proof_required,
                     'payment_status' => $sale->payment_status,
                     'outstanding_amount' => $sale->outstanding_amount,
                 ],

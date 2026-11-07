@@ -8,6 +8,7 @@ import {
     MdOutlineSchedule,
     MdPeople,
     MdReceiptLong,
+    MdSettings,
     MdSync,
     MdVerifiedUser,
 } from 'react-icons/md';
@@ -107,6 +108,12 @@ export const navigation = [
                 href: '/audit-logs',
                 icon: MdHistory,
                 permission: 'audit.view',
+            },
+            {
+                name: 'Pengaturan Bisnis',
+                href: '/settings/business',
+                icon: MdSettings,
+                permission: 'settings.manage',
             },
         ],
     },
