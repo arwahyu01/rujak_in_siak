@@ -359,6 +359,10 @@ class SyncRepository {
       await _applyShiftOpened(payload);
       return;
     }
+    if (type == 'shift.close_requested') {
+      await _applyShiftCloseRequested(payload);
+      return;
+    }
     if (type == 'shift.closed' || type == 'shift.reconciled') {
       await _applyShiftClosed(payload);
     }
@@ -589,14 +593,20 @@ class SyncRepository {
   Future<void> _applyShiftOpened(Map<String, dynamic> payload) async {
     final uuid = asStringOrNull(payload['shift_uuid']);
     if (uuid == null || uuid.isEmpty) return;
-    final existing = await (_db.select(
+    final exists = await (_db.select(
       _db.localShifts,
     )..where((row) => row.uuid.equals(uuid))).getSingleOrNull();
-    if (existing != null) {
+    if (exists != null) {
       await (_db.update(
         _db.localShifts,
       )..where((row) => row.uuid.equals(uuid))).write(
-        const LocalShiftsCompanion(status: Value('open'), synced: Value(true)),
+        LocalShiftsCompanion(
+          status: const Value('open'),
+          isClosing: const Value(false),
+          openedByName: Value(asStringOrNull(payload['user_name'])),
+          openedDeviceName: Value(asStringOrNull(payload['device_name'])),
+          synced: const Value(true),
+        ),
       );
       return;
     }
@@ -610,9 +620,31 @@ class SyncRepository {
             openingNotes: Value(asStringOrNull(payload['opening_notes'])),
             openedAt: asDate(payload['opened_at']) ?? DateTime.now(),
             expectedCash: Value(asIntOrNull(payload['expected_cash'])),
+            openedByName: Value(asStringOrNull(payload['user_name'])),
+            openedDeviceName: Value(asStringOrNull(payload['device_name'])),
             synced: const Value(true),
           ),
         );
+  }
+
+  Future<void> _applyShiftCloseRequested(Map<String, dynamic> payload) async {
+    final uuid = asStringOrNull(payload['shift_uuid']);
+    if (uuid == null || uuid.isEmpty) return;
+    final existing = await (_db.select(
+      _db.localShifts,
+    )..where((row) => row.uuid.equals(uuid))).getSingleOrNull();
+    if (existing == null) return;
+
+    await (_db.update(
+      _db.localShifts,
+    )..where((row) => row.uuid.equals(uuid))).write(
+      LocalShiftsCompanion(
+        status: const Value('closing'),
+        isClosing: const Value(true),
+        closeEpoch: Value(asIntOr(payload['close_epoch'], existing.closeEpoch)),
+        synced: const Value(true),
+      ),
+    );
   }
 
   Future<void> _applyShiftClosed(Map<String, dynamic> payload) async {
@@ -630,6 +662,10 @@ class SyncRepository {
       shift?['status'] ?? payload['status'],
       'closed_confirmed',
     );
+    final closedBy = asMapOrNull(shift?['closed_by']);
+    final closedDevice = asMapOrNull(shift?['closed_device']);
+    final openedBy = asMapOrNull(shift?['opened_by']);
+    final openingDevice = asMapOrNull(shift?['opening_device']);
     await (_db.update(
       _db.localShifts,
     )..where((row) => row.uuid.equals(uuid))).write(
@@ -648,6 +684,31 @@ class SyncRepository {
           asIntOrNull(totals?['variance'] ?? payload['variance']),
         ),
         closingNotes: Value(asStringOrNull(payload['closing_notes'])),
+        isClosing: const Value(false),
+        canFinalize: const Value(false),
+        closeActualCash: Value(
+          asIntOrNull(totals?['actual_cash'] ?? payload['actual_cash']),
+        ),
+        closedByName: Value(
+          closedBy == null ? null : asStringOrNull(closedBy['name']),
+        ),
+        closedDeviceName: Value(
+          closedDevice == null
+              ? null
+              : asStringOrNull(closedDevice['name']),
+        ),
+        openedByName: Value(
+          openedBy == null ? null : asStringOrNull(openedBy['name']),
+        ),
+        openedDeviceName: Value(
+          openingDevice == null
+              ? null
+              : asStringOrNull(openingDevice['name']),
+        ),
+        pendingDevicesJson: const Value('[]'),
+        serverSummaryJson: Value(
+          totals == null ? null : jsonEncode(totals),
+        ),
         synced: const Value(true),
       ),
     );

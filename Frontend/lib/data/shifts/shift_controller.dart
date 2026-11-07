@@ -11,7 +11,9 @@ class ShiftViewState {
   final ShiftSummary? summary;
   final bool storedOffline;
 
-  bool get hasOpenShift => shift?.isOpen == true;
+  bool get hasOpenShift => shift?.acceptsTransactions ?? false;
+
+  bool get isClosing => shift?.isClosing ?? false;
 
   ShiftViewState copyWith({
     ShiftRecord? shift,
@@ -35,7 +37,13 @@ class ShiftController extends AsyncNotifier<ShiftViewState> {
 
   Future<ShiftViewState> _load() async {
     final repository = ref.read(shiftRepositoryProvider);
-    final shift = await repository.activeShift();
+    ShiftRecord? shift;
+    try {
+      shift = await repository.refreshActiveFromServer();
+    } on AppException {
+      // Keep working from the last known local shift while offline.
+      shift = await repository.activeShift();
+    }
     if (shift == null) return const ShiftViewState();
     final summary = await repository.summary(shift);
     return ShiftViewState(
@@ -111,8 +119,34 @@ class ShiftController extends AsyncNotifier<ShiftViewState> {
       actualCash: actualCash,
       closingNotes: closingNotes,
     );
-    state = const AsyncData(ShiftViewState());
+
+    if (closed.isActive) {
+      final refreshed = await repository.summary(closed);
+      state = AsyncData(
+        ShiftViewState(shift: closed, summary: refreshed),
+      );
+    } else {
+      state = const AsyncData(ShiftViewState());
+    }
     return closed;
+  }
+
+  Future<ShiftRecord> checkpoint() async {
+    final shift = state.value?.shift;
+    if (shift == null) {
+      throw const AppException('SHIFT_NOT_OPEN', 'Tidak ada shift aktif.');
+    }
+    final repository = ref.read(shiftRepositoryProvider);
+    final updated = await repository.checkpoint(shift);
+    if (updated.isActive) {
+      final summary = await repository.summary(updated);
+      state = AsyncData(
+        ShiftViewState(shift: updated, summary: summary),
+      );
+    } else {
+      state = const AsyncData(ShiftViewState());
+    }
+    return updated;
   }
 
   Future<void> refresh() async {

@@ -8,6 +8,7 @@ use App\Models\Shift;
 use App\Models\User;
 use App\Services\AuditLogger;
 use App\Services\ShiftSummaryService;
+use App\Services\ShiftSyncCoordinator;
 use App\Services\SyncRecorder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -18,6 +19,7 @@ class RecordCashMovement
         private readonly ShiftSummaryService $summary,
         private readonly AuditLogger $audit,
         private readonly SyncRecorder $sync,
+        private readonly ShiftSyncCoordinator $coordinator,
     ) {}
 
     public function handle(Shift $shift, array $data, User $actor, Device $device): Shift
@@ -30,6 +32,13 @@ class RecordCashMovement
                 throw ApiException::notFound('Shift tidak ditemukan.');
             }
 
+            if ($shift->status === Shift::STATUS_CLOSING) {
+                throw ApiException::conflict(
+                    'SHIFT_CLOSING',
+                    'Shift sedang ditutup. Kas masuk/keluar tidak dapat dicatat lagi.',
+                );
+            }
+
             if ($shift->status !== Shift::STATUS_OPEN) {
                 throw ApiException::conflict('SHIFT_NOT_OPEN', 'Kas hanya dapat dicatat pada shift yang terbuka.');
             }
@@ -40,8 +49,11 @@ class RecordCashMovement
                 'amount' => (int) $data['amount'],
                 'reason' => $data['reason'] ?? null,
                 'created_by' => $actor->id,
+                'device_id' => $device->id,
                 'occurred_at' => now(),
             ]);
+
+            $this->coordinator->markTransactionParticipant($shift, $device, $actor);
 
             $totals = $this->summary->calculate($shift);
             $shift->forceFill([
@@ -56,7 +68,7 @@ class RecordCashMovement
                 'Mencatat kas '.$movement->type.' pada shift '.$shift->uuid,
                 $movement,
                 [],
-                $movement->only(['type', 'amount', 'reason']),
+                $movement->only(['type', 'amount', 'reason']) + ['device_uuid' => $device->uuid],
                 $actor,
                 $shift->business_id,
             );
@@ -71,6 +83,8 @@ class RecordCashMovement
                     'type' => $movement->type,
                     'amount' => (int) $movement->amount,
                     'reason' => $movement->reason,
+                    'created_by' => $actor->uuid,
+                    'device_uuid' => $device->uuid,
                     'occurred_at' => $movement->occurred_at?->toIso8601String(),
                     'expected_cash' => (int) $shift->expected_cash,
                 ],
@@ -79,7 +93,14 @@ class RecordCashMovement
                 $device->id,
             );
 
-            return $shift->refresh()->load(['closingSnapshot', 'cashMovements', 'cashier', 'device', 'outlet']);
+            return $shift->refresh()->load([
+                'cashier',
+                'device',
+                'outlet',
+                'closingSnapshot',
+                'cashMovements.createdBy',
+                'cashMovements.device',
+            ]);
         });
     }
 }

@@ -17,6 +17,8 @@ class ShiftClosingSnapshot extends Model
         'outlet_id',
         'user_id',
         'device_id',
+        'closed_by_user_id',
+        'closed_device_id',
         'opening_cash',
         'cash_tendered',
         'cash_change',
@@ -30,10 +32,14 @@ class ShiftClosingSnapshot extends Model
         'awaiting_verification_amount',
         'local_transaction_count',
         'pending_sync_count',
+        'device_count',
+        'synced_device_count',
+        'checkpoint_epoch',
         'local_event_sequence',
         'closing_notes',
         'snapshot',
         'closed_at',
+        'finalized_at',
     ];
 
     protected function casts(): array
@@ -52,14 +58,28 @@ class ShiftClosingSnapshot extends Model
             'awaiting_verification_amount' => 'integer',
             'local_transaction_count' => 'integer',
             'pending_sync_count' => 'integer',
+            'device_count' => 'integer',
+            'synced_device_count' => 'integer',
+            'checkpoint_epoch' => 'integer',
             'local_event_sequence' => 'integer',
             'snapshot' => 'array',
             'closed_at' => 'datetime',
+            'finalized_at' => 'datetime',
         ];
     }
 
     public function shift(): BelongsTo
     {
         return $this->belongsTo(Shift::class);
+    }
+
+    public function closedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'closed_by_user_id');
+    }
+
+    public function closedDevice(): BelongsTo
+    {
+        return $this->belongsTo(Device::class, 'closed_device_id');
     }
 }

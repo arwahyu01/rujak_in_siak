@@ -51,13 +51,17 @@ Route::prefix('v1')->group(function () {
 
             Route::get('/payments/pending-verification', [PaymentController::class, 'pending'])->middleware('permission:payments.view_pending');
             Route::get('/payments/{payment:uuid}', [PaymentController::class, 'show'])->middleware('permission:payments.view_pending');
+            Route::post('/payments/{payment:uuid}/proof', [PaymentController::class, 'uploadProof'])->middleware('permission:payments.record');
+            Route::get('/payments/{payment:uuid}/proof', [PaymentController::class, 'proof'])->middleware('permission:payments.view_pending');
             Route::post('/payments/{payment:uuid}/verify', [PaymentController::class, 'verify'])->middleware('permission:payments.verify');
             Route::post('/payments/{payment:uuid}/reject', [PaymentController::class, 'reject'])->middleware('permission:payments.reject');
 
             Route::get('/shifts', [ShiftController::class, 'index'])->middleware('permission:shifts.view');
+            Route::get('/shifts/active', [ShiftController::class, 'active'])->middleware('permission:shifts.view');
             Route::post('/shifts/open', [ShiftController::class, 'open'])->middleware('permission:shifts.manage');
             Route::post('/shifts/close', [ShiftController::class, 'close'])->middleware('permission:shifts.manage');
             Route::get('/shifts/{shift:uuid}', [ShiftController::class, 'show'])->middleware('permission:shifts.view');
+            Route::post('/shifts/{shift:uuid}/sync-checkpoint', [ShiftController::class, 'checkpoint'])->middleware('permission:shifts.view');
             Route::post('/shifts/{shift:uuid}/cash-movements', [ShiftController::class, 'cashMovement'])->middleware('permission:shifts.manage');
             Route::post('/shifts/{shift:uuid}/reconcile', [ShiftController::class, 'reconcile'])->middleware('permission:shifts.reconcile');
 

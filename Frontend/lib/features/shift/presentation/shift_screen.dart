@@ -19,12 +19,13 @@ class ShiftScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(shiftProvider);
     final user = ref.watch(sessionProvider).value?.user;
-    final canManage =
-        user?.canAny(const ['shifts.manage', 'shifts.view']) ?? false;
+    final canView =
+        user?.canAny(const ['shifts.view', 'shifts.manage']) ?? false;
+    final canManage = user?.can('shifts.manage') ?? false;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Shift kasir'),
+        title: const Text('Shift outlet'),
         actions: [
           IconButton(
             onPressed: state.isLoading
@@ -46,11 +47,12 @@ class ShiftScreen extends ConsumerWidget {
           final shift = value.shift;
           final summary = value.summary;
           if (shift == null || summary == null) {
-            return _OpenShiftView(canManage: canManage);
+            return _OpenShiftView(canView: canView, canManage: canManage);
           }
           return _ActiveShiftView(
             summary: summary,
             storedOffline: value.storedOffline,
+            canView: canView,
             canManage: canManage,
           );
         },
@@ -60,8 +62,9 @@ class ShiftScreen extends ConsumerWidget {
 }
 
 class _OpenShiftView extends ConsumerStatefulWidget {
-  const _OpenShiftView({required this.canManage});
+  const _OpenShiftView({required this.canView, required this.canManage});
 
+  final bool canView;
   final bool canManage;
 
   @override
@@ -100,7 +103,7 @@ class _OpenShiftViewState extends ConsumerState<_OpenShiftView> {
         SnackBar(
           content: Text(
             shift.synced
-                ? 'Shift dibuka.'
+                ? 'Shift outlet dibuka. Semua kasir dapat bertransaksi.'
                 : 'Shift dibuka offline dan akan disinkronkan.',
           ),
         ),
@@ -125,8 +128,9 @@ class _OpenShiftViewState extends ConsumerState<_OpenShiftView> {
       children: [
         const InfoBanner(
           message:
-              'Buka shift sebelum memproses transaksi. Modal awal digunakan '
-              'untuk menghitung kas yang seharusnya ada saat tutup shift.',
+              'Satu outlet memiliki satu shift bersama. Owner membuka shift '
+              'dengan modal awal, lalu semua kasir memakai shift yang sama '
+              'dari perangkat masing-masing.',
           tone: StatusTone.info,
           icon: Icons.info_outline_rounded,
         ),
@@ -138,53 +142,65 @@ class _OpenShiftViewState extends ConsumerState<_OpenShiftView> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Text(
-                  'Buka shift baru',
+                  'Buka shift outlet',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
-                const SizedBox(height: AppSpacing.md),
-                TextField(
-                  controller: _cash,
-                  enabled: widget.canManage && !_submitting,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: const InputDecoration(
-                    labelText: 'Modal awal',
-                    prefixText: 'Rp ',
-                  ),
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  widget.canManage
+                      ? 'Belum ada shift aktif. Buka shift untuk mulai '
+                          'menerima transaksi dari semua perangkat.'
+                      : 'Belum ada shift aktif. Minta Owner atau pengguna '
+                          'dengan izin shift untuk membuka shift outlet.',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: AppColors.inkMuted),
                 ),
-                const SizedBox(height: AppSpacing.md),
-                TextField(
-                  controller: _notes,
-                  enabled: widget.canManage && !_submitting,
-                  maxLines: 2,
-                  decoration: const InputDecoration(
-                    labelText: 'Catatan pembukaan (opsional)',
-                  ),
-                ),
-                if (_error != null) ...[
-                  const SizedBox(height: AppSpacing.sm),
-                  Text(
-                    _error!,
-                    style: const TextStyle(
-                      color: AppColors.danger,
-                      fontSize: 12,
+                if (widget.canManage) ...[
+                  const SizedBox(height: AppSpacing.md),
+                  TextField(
+                    controller: _cash,
+                    enabled: !_submitting,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: const InputDecoration(
+                      labelText: 'Modal awal',
+                      prefixText: 'Rp ',
                     ),
                   ),
-                ],
-                const SizedBox(height: AppSpacing.lg),
-                FilledButton.icon(
-                  onPressed: widget.canManage && !_submitting ? _open : null,
-                  icon: _submitting
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.play_arrow_rounded),
-                  label: Text(_submitting ? 'Membuka shift…' : 'Buka shift'),
-                ),
-                if (!widget.canManage) ...[
-                  const SizedBox(height: AppSpacing.sm),
+                  const SizedBox(height: AppSpacing.md),
+                  TextField(
+                    controller: _notes,
+                    enabled: !_submitting,
+                    maxLines: 2,
+                    decoration: const InputDecoration(
+                      labelText: 'Catatan pembukaan (opsional)',
+                    ),
+                  ),
+                  if (_error != null) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      _error!,
+                      style: const TextStyle(
+                        color: AppColors.danger,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: AppSpacing.lg),
+                  FilledButton.icon(
+                    onPressed: _submitting ? null : _open,
+                    icon: _submitting
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.play_arrow_rounded),
+                    label: Text(_submitting ? 'Membuka shift…' : 'Buka shift'),
+                  ),
+                ] else ...[
+                  const SizedBox(height: AppSpacing.md),
                   const Text(
                     'Akun ini tidak memiliki izin membuka shift.',
                     style: TextStyle(color: AppColors.inkMuted, fontSize: 12),
@@ -203,11 +219,13 @@ class _ActiveShiftView extends ConsumerWidget {
   const _ActiveShiftView({
     required this.summary,
     required this.storedOffline,
+    required this.canView,
     required this.canManage,
   });
 
   final ShiftSummary summary;
   final bool storedOffline;
+  final bool canView;
   final bool canManage;
 
   Future<void> _movement(
@@ -257,12 +275,39 @@ class _ActiveShiftView extends ConsumerWidget {
           .read(shiftProvider.notifier)
           .close(actualCash: result.actualCash, closingNotes: result.notes);
       if (!context.mounted) return;
+      final pending = closed.pendingDevices;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            closed.isClosedPendingSync
-                ? 'Shift ditutup offline dan menunggu sinkronisasi.'
-                : 'Shift ditutup.',
+            closed.isClosedConfirmed
+                ? 'Shift ditutup dan snapshot tersimpan.'
+                : closed.isClosing
+                ? pending.isEmpty
+                      ? 'Penutupan shift menunggu konfirmasi perangkat.'
+                      : 'Penutupan tertahan. Perangkat belum sinkron: '
+                            '${pending.map((d) => d.displayName).join(', ')}.'
+                : closed.statusLabel,
+          ),
+        ),
+      );
+    } on AppException catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+    }
+  }
+
+  Future<void> _checkpoint(BuildContext context, WidgetRef ref) async {
+    try {
+      final updated = await ref.read(shiftProvider.notifier).checkpoint();
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            updated.isClosedConfirmed
+                ? 'Perangkat terkonfirmasi. Shift selesai ditutup.'
+                : 'Perangkat terkonfirmasi. Masih menunggu perangkat lain.',
           ),
         ),
       );
@@ -298,6 +343,18 @@ class _ActiveShiftView extends ConsumerWidget {
               icon: Icons.cloud_off_rounded,
             ),
           ),
+        if (shift.waitingForDevices)
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppSpacing.md),
+            child: InfoBanner(
+              message:
+                  'Penutupan shift tertahan sampai semua perangkat yang '
+                  'bertransaksi mengonfirmasi sinkronisasi. Perangkat ini '
+                  'dapat mengonfirmasi setelah outbox kosong.',
+              tone: StatusTone.warning,
+              icon: Icons.sync_problem_rounded,
+            ),
+          ),
         if (summary.awaitingVerification > 0)
           const Padding(
             padding: EdgeInsets.only(bottom: AppSpacing.md),
@@ -322,24 +379,46 @@ class _ActiveShiftView extends ConsumerWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Shift aktif',
+                            'Shift outlet bersama',
                             style: theme.textTheme.titleMedium,
                           ),
                           Text(
-                            'Dibuka ${formatDateTime(shift.openedAt)}',
+                            shift.openedByName == null
+                                ? 'Dibuka ${formatDateTime(shift.openedAt)}'
+                                : 'Dibuka ${shift.openedByName} · '
+                                      '${formatDateTime(shift.openedAt)}',
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: AppColors.inkMuted,
                             ),
                           ),
+                          if (shift.openedDeviceName != null)
+                            Text(
+                              'Perangkat pembuka: ${shift.openedDeviceName}',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: AppColors.inkMuted,
+                              ),
+                            ),
                         ],
                       ),
                     ),
                     StatusChip(
                       label: shift.statusLabel,
-                      tone: StatusTone.success,
+                      tone: shift.isClosing
+                          ? StatusTone.warning
+                          : StatusTone.success,
                     ),
                   ],
                 ),
+                if (summary.fromServer) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  const InfoBanner(
+                    message:
+                        'Ringkasan dari server dan mencakup transaksi seluruh '
+                        'perangkat pada shift ini.',
+                    tone: StatusTone.info,
+                    icon: Icons.devices_rounded,
+                  ),
+                ],
                 const Divider(height: AppSpacing.xl),
                 _row(context, 'Modal awal', shift.openingCash),
                 _row(context, 'Tunai diterima', summary.cashTendered),
@@ -394,8 +473,26 @@ class _ActiveShiftView extends ConsumerWidget {
             ),
           ),
         ),
+        if (shift.pendingDevices.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.lg),
+          _PendingDevicesCard(devices: shift.pendingDevices),
+        ],
         const SizedBox(height: AppSpacing.lg),
-        if (canManage) ...[
+        if (shift.isClosing) ...[
+          OutlinedButton.icon(
+            onPressed: () => ref.read(shiftProvider.notifier).refresh(),
+            icon: const Icon(Icons.refresh_rounded),
+            label: const Text('Perbarui status penutupan'),
+          ),
+          if (canView) ...[
+            const SizedBox(height: AppSpacing.sm),
+            FilledButton.icon(
+              onPressed: () => _checkpoint(context, ref),
+              icon: const Icon(Icons.cloud_done_rounded),
+              label: const Text('Konfirmasi perangkat ini sudah sinkron'),
+            ),
+          ],
+        ] else if (canManage) ...[
           Row(
             children: [
               Expanded(
@@ -448,6 +545,52 @@ class _ActiveShiftView extends ConsumerWidget {
           Expanded(child: Text(label, style: style)),
           Text(formatRupiah(value), style: style),
         ],
+      ),
+    );
+  }
+}
+
+class _PendingDevicesCard extends StatelessWidget {
+  const _PendingDevicesCard({required this.devices});
+
+  final List<ShiftPendingDevice> devices;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('Perangkat yang belum sinkron', style: theme.textTheme.titleSmall),
+            const SizedBox(height: AppSpacing.sm),
+            for (final device in devices)
+              Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      device.userName == null
+                          ? device.displayName
+                          : '${device.displayName} · ${device.userName}',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    Text(
+                      device.reason,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: AppColors.inkMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -600,19 +743,41 @@ class _CloseDialogState extends State<_CloseDialog> {
   Widget build(BuildContext context) {
     final actual = _actual;
     final variance = actual == null ? null : widget.summary.varianceFor(actual);
+    final shift = widget.summary.shift;
     return AlertDialog(
-      title: const Text('Tutup shift'),
+      title: const Text('Tutup shift outlet'),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
+              shift.openedByName == null
+                  ? 'Shift dibuka ${formatDateTime(shift.openedAt)}'
+                  : 'Dibuka ${shift.openedByName} · '
+                        '${formatDateTime(shift.openedAt)}',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: AppColors.inkMuted),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
               'Kas seharusnya ${formatRupiah(widget.summary.expectedCash)}',
               style: Theme.of(
                 context,
               ).textTheme.bodySmall?.copyWith(color: AppColors.inkMuted),
             ),
+            if (widget.summary.fromServer)
+              const Padding(
+                padding: EdgeInsets.only(top: AppSpacing.sm),
+                child: Text(
+                  'Total mencakup transaksi dari semua perangkat.',
+                  style: TextStyle(
+                    color: AppColors.inkMuted,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
             const SizedBox(height: AppSpacing.md),
             TextField(
               controller: _cash,
@@ -643,6 +808,12 @@ class _CloseDialogState extends State<_CloseDialog> {
               decoration: const InputDecoration(
                 labelText: 'Catatan penutupan (opsional)',
               ),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            const Text(
+              'Shift baru final setelah semua perangkat yang bertransaksi '
+              'mengonfirmasi sinkronisasi.',
+              style: TextStyle(color: AppColors.inkMuted, fontSize: 12),
             ),
             if (_error != null) ...[
               const SizedBox(height: AppSpacing.sm),

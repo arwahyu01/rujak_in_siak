@@ -90,6 +90,22 @@ trait CreatesApiContext
         ];
     }
 
+    protected function makeDevice(string $terminalCode, ?int $outletId = null): Device
+    {
+        return Device::create([
+            'uuid' => (string) Str::uuid(),
+            'business_id' => $this->business->id,
+            'outlet_id' => $outletId ?? $this->outlet->id,
+            'name' => 'Terminal '.$terminalCode,
+            'terminal_code' => $terminalCode,
+            'platform' => 'android',
+            'status' => Device::STATUS_ACTIVE,
+            'last_sequence' => 0,
+            'last_seen_at' => now(),
+            'activated_at' => now(),
+        ]);
+    }
+
     /**
      * @return array{0: Business, 1: Outlet, 2: User, 3: Device}
      */

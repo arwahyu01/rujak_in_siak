@@ -31,7 +31,7 @@ class ResolveApiDevice
             ->where('business_id', $user->business_id)
             ->where(function ($query) use ($user) {
                 $query->where('outlet_id', $user->outlet_id)
-                    ->orWhereNull($user->outlet_id);
+                    ->orWhereNull('outlet_id');
             })
             ->first();
 

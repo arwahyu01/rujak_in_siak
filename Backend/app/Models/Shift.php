@@ -14,6 +14,8 @@ class Shift extends Model
 
     public const STATUS_OPEN = 'open';
 
+    public const STATUS_CLOSING = 'closing';
+
     public const STATUS_CLOSED_PENDING_SYNC = 'closed_pending_sync';
 
     public const STATUS_CLOSED_CONFIRMED = 'closed_confirmed';
@@ -26,6 +28,8 @@ class Shift extends Model
         'user_id',
         'device_id',
         'status',
+        'open_slot',
+        'close_epoch',
         'opening_cash',
         'cash_tendered',
         'cash_change',
@@ -44,6 +48,12 @@ class Shift extends Model
         'closing_notes',
         'opened_at',
         'closed_at',
+        'closing_started_at',
+        'closing_requested_by',
+        'closing_requested_device_id',
+        'close_actual_cash',
+        'closed_by_user_id',
+        'closed_device_id',
         'approved_by',
         'approved_at',
     ];
@@ -65,10 +75,31 @@ class Shift extends Model
             'local_transaction_count' => 'integer',
             'pending_sync_count' => 'integer',
             'local_event_sequence' => 'integer',
+            'close_epoch' => 'integer',
+            'close_actual_cash' => 'integer',
             'opened_at' => 'datetime',
             'closed_at' => 'datetime',
+            'closing_started_at' => 'datetime',
             'approved_at' => 'datetime',
         ];
+    }
+
+    public function isActive(): bool
+    {
+        return in_array($this->status, [self::STATUS_OPEN, self::STATUS_CLOSING], true);
+    }
+
+    public function isAcceptingTransactions(): bool
+    {
+        return $this->status === self::STATUS_OPEN;
+    }
+
+    public function isFinalized(): bool
+    {
+        return in_array($this->status, [
+            self::STATUS_CLOSED_CONFIRMED,
+            self::STATUS_CLOSED_SYNC_EXCEPTION,
+        ], true);
     }
 
     public function business(): BelongsTo
@@ -94,6 +125,31 @@ class Shift extends Model
     public function approvedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'approved_by');
+    }
+
+    public function closingRequestedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'closing_requested_by');
+    }
+
+    public function closingRequestedDevice(): BelongsTo
+    {
+        return $this->belongsTo(Device::class, 'closing_requested_device_id');
+    }
+
+    public function closedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'closed_by_user_id');
+    }
+
+    public function closedDevice(): BelongsTo
+    {
+        return $this->belongsTo(Device::class, 'closed_device_id');
+    }
+
+    public function participants(): HasMany
+    {
+        return $this->hasMany(ShiftDevice::class);
     }
 
     public function sales(): HasMany

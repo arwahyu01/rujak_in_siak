@@ -31,6 +31,9 @@ class DeviceController extends Controller
         }
 
         $device = DB::transaction(function () use ($request, $user, $outlet, $leases, $audit) {
+            // Serialize terminal allocation within an outlet so concurrent device
+            // registrations cannot select the same POS number.
+            $outlet = $outlet->newQuery()->whereKey($outlet->id)->lockForUpdate()->firstOrFail();
             $existing = Device::query()->where('uuid', (string) $request->input('uuid'))->first();
 
             if ($existing && ((int) $existing->business_id !== (int) $user->business_id
@@ -47,7 +50,10 @@ class DeviceController extends Controller
                 throw new ApiException('DEVICE_FINGERPRINT_MISMATCH', 'Fingerprint perangkat tidak cocok dengan registrasi sebelumnya.', 403);
             }
 
-            $terminalCode = strtoupper((string) $request->input('terminal_code'));
+            $terminalCode = strtoupper(trim((string) $request->input('terminal_code')));
+            if ($terminalCode === '') {
+                $terminalCode = $existing?->terminal_code ?? $this->nextTerminalCode($outlet->id);
+            }
             $terminalTaken = Device::query()
                 ->where('outlet_id', $outlet->id)
                 ->where('terminal_code', $terminalCode)
@@ -112,6 +118,25 @@ class DeviceController extends Controller
             'device' => new DeviceResource($device['device']->load('outlet')),
             'offline_lease' => $device['lease'],
         ], 201);
+    }
+
+    private function nextTerminalCode(int $outletId): string
+    {
+        $used = Device::query()
+            ->where('outlet_id', $outletId)
+            ->pluck('terminal_code')
+            ->map(fn ($code) => strtoupper((string) $code))
+            ->all();
+        $used = array_fill_keys($used, true);
+
+        for ($number = 1; $number <= 999999; $number++) {
+            $candidate = 'POS'.$number;
+            if (! isset($used[$candidate])) {
+                return $candidate;
+            }
+        }
+
+        throw ApiException::conflict('TERMINAL_CODE_EXHAUSTED', 'Tidak ada kode terminal yang tersedia untuk outlet ini.');
     }
 
     public function index(Request $request): JsonResponse

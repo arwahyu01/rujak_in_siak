@@ -20,6 +20,7 @@ part 'app_database.g.dart';
     LocalSales,
     SaleItems,
     SalePayments,
+    PaymentProofUploads,
     OutboxEvents,
     LocalShifts,
     CashMovements,
@@ -35,7 +36,7 @@ class AppDatabase extends _$AppDatabase {
   static const String databaseFileName = 'rujak_pos.sqlite';
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -45,6 +46,21 @@ class AppDatabase extends _$AppDatabase {
     onUpgrade: (m, from, to) async {
       if (from < 2) {
         await m.addColumn(salePayments, salePayments.paymentUuid);
+      }
+      if (from < 3) {
+        await m.addColumn(localShifts, localShifts.closeEpoch);
+        await m.addColumn(localShifts, localShifts.isClosing);
+        await m.addColumn(localShifts, localShifts.openedByName);
+        await m.addColumn(localShifts, localShifts.openedDeviceName);
+        await m.addColumn(localShifts, localShifts.closeActualCash);
+        await m.addColumn(localShifts, localShifts.closedByName);
+        await m.addColumn(localShifts, localShifts.closedDeviceName);
+        await m.addColumn(localShifts, localShifts.canFinalize);
+        await m.addColumn(localShifts, localShifts.pendingDevicesJson);
+        await m.addColumn(localShifts, localShifts.serverSummaryJson);
+      }
+      if (from < 4) {
+        await m.createTable(paymentProofUploads);
       }
     },
     beforeOpen: (details) async {
@@ -100,6 +116,7 @@ class AppDatabase extends _$AppDatabase {
     await transaction(() async {
       await delete(outboxEvents).go();
       await delete(printJobs).go();
+      await delete(paymentProofUploads).go();
       await delete(cashMovements).go();
       await delete(salePayments).go();
       await delete(saleItems).go();

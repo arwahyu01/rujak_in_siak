@@ -6510,6 +6510,723 @@ class SalePaymentsCompanion extends UpdateCompanion<SalePayment> {
   }
 }
 
+class $PaymentProofUploadsTable extends PaymentProofUploads
+    with TableInfo<$PaymentProofUploadsTable, PaymentProofUpload> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $PaymentProofUploadsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    hasAutoIncrement: true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'PRIMARY KEY AUTOINCREMENT',
+    ),
+  );
+  static const VerificationMeta _saleUuidMeta = const VerificationMeta(
+    'saleUuid',
+  );
+  @override
+  late final GeneratedColumn<String> saleUuid = GeneratedColumn<String>(
+    'sale_uuid',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _paymentUuidMeta = const VerificationMeta(
+    'paymentUuid',
+  );
+  @override
+  late final GeneratedColumn<String> paymentUuid = GeneratedColumn<String>(
+    'payment_uuid',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'),
+  );
+  static const VerificationMeta _idempotencyKeyMeta = const VerificationMeta(
+    'idempotencyKey',
+  );
+  @override
+  late final GeneratedColumn<String> idempotencyKey = GeneratedColumn<String>(
+    'idempotency_key',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _localPathMeta = const VerificationMeta(
+    'localPath',
+  );
+  @override
+  late final GeneratedColumn<String> localPath = GeneratedColumn<String>(
+    'local_path',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _statusMeta = const VerificationMeta('status');
+  @override
+  late final GeneratedColumn<String> status = GeneratedColumn<String>(
+    'status',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('pending'),
+  );
+  static const VerificationMeta _attemptsMeta = const VerificationMeta(
+    'attempts',
+  );
+  @override
+  late final GeneratedColumn<int> attempts = GeneratedColumn<int>(
+    'attempts',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _lastErrorMeta = const VerificationMeta(
+    'lastError',
+  );
+  @override
+  late final GeneratedColumn<String> lastError = GeneratedColumn<String>(
+    'last_error',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _nextAttemptAtMeta = const VerificationMeta(
+    'nextAttemptAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> nextAttemptAt =
+      GeneratedColumn<DateTime>(
+        'next_attempt_at',
+        aliasedName,
+        true,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _uploadedAtMeta = const VerificationMeta(
+    'uploadedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> uploadedAt = GeneratedColumn<DateTime>(
+    'uploaded_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    saleUuid,
+    paymentUuid,
+    idempotencyKey,
+    localPath,
+    status,
+    attempts,
+    lastError,
+    nextAttemptAt,
+    uploadedAt,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'payment_proof_uploads';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<PaymentProofUpload> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('sale_uuid')) {
+      context.handle(
+        _saleUuidMeta,
+        saleUuid.isAcceptableOrUnknown(data['sale_uuid']!, _saleUuidMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_saleUuidMeta);
+    }
+    if (data.containsKey('payment_uuid')) {
+      context.handle(
+        _paymentUuidMeta,
+        paymentUuid.isAcceptableOrUnknown(
+          data['payment_uuid']!,
+          _paymentUuidMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_paymentUuidMeta);
+    }
+    if (data.containsKey('idempotency_key')) {
+      context.handle(
+        _idempotencyKeyMeta,
+        idempotencyKey.isAcceptableOrUnknown(
+          data['idempotency_key']!,
+          _idempotencyKeyMeta,
+        ),
+      );
+    }
+    if (data.containsKey('local_path')) {
+      context.handle(
+        _localPathMeta,
+        localPath.isAcceptableOrUnknown(data['local_path']!, _localPathMeta),
+      );
+    }
+    if (data.containsKey('status')) {
+      context.handle(
+        _statusMeta,
+        status.isAcceptableOrUnknown(data['status']!, _statusMeta),
+      );
+    }
+    if (data.containsKey('attempts')) {
+      context.handle(
+        _attemptsMeta,
+        attempts.isAcceptableOrUnknown(data['attempts']!, _attemptsMeta),
+      );
+    }
+    if (data.containsKey('last_error')) {
+      context.handle(
+        _lastErrorMeta,
+        lastError.isAcceptableOrUnknown(data['last_error']!, _lastErrorMeta),
+      );
+    }
+    if (data.containsKey('next_attempt_at')) {
+      context.handle(
+        _nextAttemptAtMeta,
+        nextAttemptAt.isAcceptableOrUnknown(
+          data['next_attempt_at']!,
+          _nextAttemptAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('uploaded_at')) {
+      context.handle(
+        _uploadedAtMeta,
+        uploadedAt.isAcceptableOrUnknown(data['uploaded_at']!, _uploadedAtMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  PaymentProofUpload map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return PaymentProofUpload(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      saleUuid: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}sale_uuid'],
+      )!,
+      paymentUuid: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}payment_uuid'],
+      )!,
+      idempotencyKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}idempotency_key'],
+      ),
+      localPath: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}local_path'],
+      ),
+      status: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}status'],
+      )!,
+      attempts: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}attempts'],
+      )!,
+      lastError: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}last_error'],
+      ),
+      nextAttemptAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}next_attempt_at'],
+      ),
+      uploadedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}uploaded_at'],
+      ),
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $PaymentProofUploadsTable createAlias(String alias) {
+    return $PaymentProofUploadsTable(attachedDatabase, alias);
+  }
+}
+
+class PaymentProofUpload extends DataClass
+    implements Insertable<PaymentProofUpload> {
+  final int id;
+  final String saleUuid;
+  final String paymentUuid;
+  final String? idempotencyKey;
+  final String? localPath;
+  final String status;
+  final int attempts;
+  final String? lastError;
+  final DateTime? nextAttemptAt;
+  final DateTime? uploadedAt;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  const PaymentProofUpload({
+    required this.id,
+    required this.saleUuid,
+    required this.paymentUuid,
+    this.idempotencyKey,
+    this.localPath,
+    required this.status,
+    required this.attempts,
+    this.lastError,
+    this.nextAttemptAt,
+    this.uploadedAt,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['sale_uuid'] = Variable<String>(saleUuid);
+    map['payment_uuid'] = Variable<String>(paymentUuid);
+    if (!nullToAbsent || idempotencyKey != null) {
+      map['idempotency_key'] = Variable<String>(idempotencyKey);
+    }
+    if (!nullToAbsent || localPath != null) {
+      map['local_path'] = Variable<String>(localPath);
+    }
+    map['status'] = Variable<String>(status);
+    map['attempts'] = Variable<int>(attempts);
+    if (!nullToAbsent || lastError != null) {
+      map['last_error'] = Variable<String>(lastError);
+    }
+    if (!nullToAbsent || nextAttemptAt != null) {
+      map['next_attempt_at'] = Variable<DateTime>(nextAttemptAt);
+    }
+    if (!nullToAbsent || uploadedAt != null) {
+      map['uploaded_at'] = Variable<DateTime>(uploadedAt);
+    }
+    map['created_at'] = Variable<DateTime>(createdAt);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  PaymentProofUploadsCompanion toCompanion(bool nullToAbsent) {
+    return PaymentProofUploadsCompanion(
+      id: Value(id),
+      saleUuid: Value(saleUuid),
+      paymentUuid: Value(paymentUuid),
+      idempotencyKey: idempotencyKey == null && nullToAbsent
+          ? const Value.absent()
+          : Value(idempotencyKey),
+      localPath: localPath == null && nullToAbsent
+          ? const Value.absent()
+          : Value(localPath),
+      status: Value(status),
+      attempts: Value(attempts),
+      lastError: lastError == null && nullToAbsent
+          ? const Value.absent()
+          : Value(lastError),
+      nextAttemptAt: nextAttemptAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(nextAttemptAt),
+      uploadedAt: uploadedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(uploadedAt),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory PaymentProofUpload.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return PaymentProofUpload(
+      id: serializer.fromJson<int>(json['id']),
+      saleUuid: serializer.fromJson<String>(json['saleUuid']),
+      paymentUuid: serializer.fromJson<String>(json['paymentUuid']),
+      idempotencyKey: serializer.fromJson<String?>(json['idempotencyKey']),
+      localPath: serializer.fromJson<String?>(json['localPath']),
+      status: serializer.fromJson<String>(json['status']),
+      attempts: serializer.fromJson<int>(json['attempts']),
+      lastError: serializer.fromJson<String?>(json['lastError']),
+      nextAttemptAt: serializer.fromJson<DateTime?>(json['nextAttemptAt']),
+      uploadedAt: serializer.fromJson<DateTime?>(json['uploadedAt']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'saleUuid': serializer.toJson<String>(saleUuid),
+      'paymentUuid': serializer.toJson<String>(paymentUuid),
+      'idempotencyKey': serializer.toJson<String?>(idempotencyKey),
+      'localPath': serializer.toJson<String?>(localPath),
+      'status': serializer.toJson<String>(status),
+      'attempts': serializer.toJson<int>(attempts),
+      'lastError': serializer.toJson<String?>(lastError),
+      'nextAttemptAt': serializer.toJson<DateTime?>(nextAttemptAt),
+      'uploadedAt': serializer.toJson<DateTime?>(uploadedAt),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  PaymentProofUpload copyWith({
+    int? id,
+    String? saleUuid,
+    String? paymentUuid,
+    Value<String?> idempotencyKey = const Value.absent(),
+    Value<String?> localPath = const Value.absent(),
+    String? status,
+    int? attempts,
+    Value<String?> lastError = const Value.absent(),
+    Value<DateTime?> nextAttemptAt = const Value.absent(),
+    Value<DateTime?> uploadedAt = const Value.absent(),
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) => PaymentProofUpload(
+    id: id ?? this.id,
+    saleUuid: saleUuid ?? this.saleUuid,
+    paymentUuid: paymentUuid ?? this.paymentUuid,
+    idempotencyKey: idempotencyKey.present
+        ? idempotencyKey.value
+        : this.idempotencyKey,
+    localPath: localPath.present ? localPath.value : this.localPath,
+    status: status ?? this.status,
+    attempts: attempts ?? this.attempts,
+    lastError: lastError.present ? lastError.value : this.lastError,
+    nextAttemptAt: nextAttemptAt.present
+        ? nextAttemptAt.value
+        : this.nextAttemptAt,
+    uploadedAt: uploadedAt.present ? uploadedAt.value : this.uploadedAt,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  PaymentProofUpload copyWithCompanion(PaymentProofUploadsCompanion data) {
+    return PaymentProofUpload(
+      id: data.id.present ? data.id.value : this.id,
+      saleUuid: data.saleUuid.present ? data.saleUuid.value : this.saleUuid,
+      paymentUuid: data.paymentUuid.present
+          ? data.paymentUuid.value
+          : this.paymentUuid,
+      idempotencyKey: data.idempotencyKey.present
+          ? data.idempotencyKey.value
+          : this.idempotencyKey,
+      localPath: data.localPath.present ? data.localPath.value : this.localPath,
+      status: data.status.present ? data.status.value : this.status,
+      attempts: data.attempts.present ? data.attempts.value : this.attempts,
+      lastError: data.lastError.present ? data.lastError.value : this.lastError,
+      nextAttemptAt: data.nextAttemptAt.present
+          ? data.nextAttemptAt.value
+          : this.nextAttemptAt,
+      uploadedAt: data.uploadedAt.present
+          ? data.uploadedAt.value
+          : this.uploadedAt,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('PaymentProofUpload(')
+          ..write('id: $id, ')
+          ..write('saleUuid: $saleUuid, ')
+          ..write('paymentUuid: $paymentUuid, ')
+          ..write('idempotencyKey: $idempotencyKey, ')
+          ..write('localPath: $localPath, ')
+          ..write('status: $status, ')
+          ..write('attempts: $attempts, ')
+          ..write('lastError: $lastError, ')
+          ..write('nextAttemptAt: $nextAttemptAt, ')
+          ..write('uploadedAt: $uploadedAt, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    saleUuid,
+    paymentUuid,
+    idempotencyKey,
+    localPath,
+    status,
+    attempts,
+    lastError,
+    nextAttemptAt,
+    uploadedAt,
+    createdAt,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is PaymentProofUpload &&
+          other.id == this.id &&
+          other.saleUuid == this.saleUuid &&
+          other.paymentUuid == this.paymentUuid &&
+          other.idempotencyKey == this.idempotencyKey &&
+          other.localPath == this.localPath &&
+          other.status == this.status &&
+          other.attempts == this.attempts &&
+          other.lastError == this.lastError &&
+          other.nextAttemptAt == this.nextAttemptAt &&
+          other.uploadedAt == this.uploadedAt &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class PaymentProofUploadsCompanion extends UpdateCompanion<PaymentProofUpload> {
+  final Value<int> id;
+  final Value<String> saleUuid;
+  final Value<String> paymentUuid;
+  final Value<String?> idempotencyKey;
+  final Value<String?> localPath;
+  final Value<String> status;
+  final Value<int> attempts;
+  final Value<String?> lastError;
+  final Value<DateTime?> nextAttemptAt;
+  final Value<DateTime?> uploadedAt;
+  final Value<DateTime> createdAt;
+  final Value<DateTime> updatedAt;
+  const PaymentProofUploadsCompanion({
+    this.id = const Value.absent(),
+    this.saleUuid = const Value.absent(),
+    this.paymentUuid = const Value.absent(),
+    this.idempotencyKey = const Value.absent(),
+    this.localPath = const Value.absent(),
+    this.status = const Value.absent(),
+    this.attempts = const Value.absent(),
+    this.lastError = const Value.absent(),
+    this.nextAttemptAt = const Value.absent(),
+    this.uploadedAt = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+  });
+  PaymentProofUploadsCompanion.insert({
+    this.id = const Value.absent(),
+    required String saleUuid,
+    required String paymentUuid,
+    this.idempotencyKey = const Value.absent(),
+    this.localPath = const Value.absent(),
+    this.status = const Value.absent(),
+    this.attempts = const Value.absent(),
+    this.lastError = const Value.absent(),
+    this.nextAttemptAt = const Value.absent(),
+    this.uploadedAt = const Value.absent(),
+    required DateTime createdAt,
+    required DateTime updatedAt,
+  }) : saleUuid = Value(saleUuid),
+       paymentUuid = Value(paymentUuid),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<PaymentProofUpload> custom({
+    Expression<int>? id,
+    Expression<String>? saleUuid,
+    Expression<String>? paymentUuid,
+    Expression<String>? idempotencyKey,
+    Expression<String>? localPath,
+    Expression<String>? status,
+    Expression<int>? attempts,
+    Expression<String>? lastError,
+    Expression<DateTime>? nextAttemptAt,
+    Expression<DateTime>? uploadedAt,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? updatedAt,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (saleUuid != null) 'sale_uuid': saleUuid,
+      if (paymentUuid != null) 'payment_uuid': paymentUuid,
+      if (idempotencyKey != null) 'idempotency_key': idempotencyKey,
+      if (localPath != null) 'local_path': localPath,
+      if (status != null) 'status': status,
+      if (attempts != null) 'attempts': attempts,
+      if (lastError != null) 'last_error': lastError,
+      if (nextAttemptAt != null) 'next_attempt_at': nextAttemptAt,
+      if (uploadedAt != null) 'uploaded_at': uploadedAt,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+    });
+  }
+
+  PaymentProofUploadsCompanion copyWith({
+    Value<int>? id,
+    Value<String>? saleUuid,
+    Value<String>? paymentUuid,
+    Value<String?>? idempotencyKey,
+    Value<String?>? localPath,
+    Value<String>? status,
+    Value<int>? attempts,
+    Value<String?>? lastError,
+    Value<DateTime?>? nextAttemptAt,
+    Value<DateTime?>? uploadedAt,
+    Value<DateTime>? createdAt,
+    Value<DateTime>? updatedAt,
+  }) {
+    return PaymentProofUploadsCompanion(
+      id: id ?? this.id,
+      saleUuid: saleUuid ?? this.saleUuid,
+      paymentUuid: paymentUuid ?? this.paymentUuid,
+      idempotencyKey: idempotencyKey ?? this.idempotencyKey,
+      localPath: localPath ?? this.localPath,
+      status: status ?? this.status,
+      attempts: attempts ?? this.attempts,
+      lastError: lastError ?? this.lastError,
+      nextAttemptAt: nextAttemptAt ?? this.nextAttemptAt,
+      uploadedAt: uploadedAt ?? this.uploadedAt,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (saleUuid.present) {
+      map['sale_uuid'] = Variable<String>(saleUuid.value);
+    }
+    if (paymentUuid.present) {
+      map['payment_uuid'] = Variable<String>(paymentUuid.value);
+    }
+    if (idempotencyKey.present) {
+      map['idempotency_key'] = Variable<String>(idempotencyKey.value);
+    }
+    if (localPath.present) {
+      map['local_path'] = Variable<String>(localPath.value);
+    }
+    if (status.present) {
+      map['status'] = Variable<String>(status.value);
+    }
+    if (attempts.present) {
+      map['attempts'] = Variable<int>(attempts.value);
+    }
+    if (lastError.present) {
+      map['last_error'] = Variable<String>(lastError.value);
+    }
+    if (nextAttemptAt.present) {
+      map['next_attempt_at'] = Variable<DateTime>(nextAttemptAt.value);
+    }
+    if (uploadedAt.present) {
+      map['uploaded_at'] = Variable<DateTime>(uploadedAt.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('PaymentProofUploadsCompanion(')
+          ..write('id: $id, ')
+          ..write('saleUuid: $saleUuid, ')
+          ..write('paymentUuid: $paymentUuid, ')
+          ..write('idempotencyKey: $idempotencyKey, ')
+          ..write('localPath: $localPath, ')
+          ..write('status: $status, ')
+          ..write('attempts: $attempts, ')
+          ..write('lastError: $lastError, ')
+          ..write('nextAttemptAt: $nextAttemptAt, ')
+          ..write('uploadedAt: $uploadedAt, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $OutboxEventsTable extends OutboxEvents
     with TableInfo<$OutboxEventsTable, OutboxEvent> {
   @override
@@ -7501,6 +8218,127 @@ class $LocalShiftsTable extends LocalShifts
     ),
     defaultValue: const Constant(false),
   );
+  static const VerificationMeta _closeEpochMeta = const VerificationMeta(
+    'closeEpoch',
+  );
+  @override
+  late final GeneratedColumn<int> closeEpoch = GeneratedColumn<int>(
+    'close_epoch',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _isClosingMeta = const VerificationMeta(
+    'isClosing',
+  );
+  @override
+  late final GeneratedColumn<bool> isClosing = GeneratedColumn<bool>(
+    'is_closing',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_closing" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _openedByNameMeta = const VerificationMeta(
+    'openedByName',
+  );
+  @override
+  late final GeneratedColumn<String> openedByName = GeneratedColumn<String>(
+    'opened_by_name',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _openedDeviceNameMeta = const VerificationMeta(
+    'openedDeviceName',
+  );
+  @override
+  late final GeneratedColumn<String> openedDeviceName = GeneratedColumn<String>(
+    'opened_device_name',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _closeActualCashMeta = const VerificationMeta(
+    'closeActualCash',
+  );
+  @override
+  late final GeneratedColumn<int> closeActualCash = GeneratedColumn<int>(
+    'close_actual_cash',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _closedByNameMeta = const VerificationMeta(
+    'closedByName',
+  );
+  @override
+  late final GeneratedColumn<String> closedByName = GeneratedColumn<String>(
+    'closed_by_name',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _closedDeviceNameMeta = const VerificationMeta(
+    'closedDeviceName',
+  );
+  @override
+  late final GeneratedColumn<String> closedDeviceName = GeneratedColumn<String>(
+    'closed_device_name',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _canFinalizeMeta = const VerificationMeta(
+    'canFinalize',
+  );
+  @override
+  late final GeneratedColumn<bool> canFinalize = GeneratedColumn<bool>(
+    'can_finalize',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("can_finalize" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _pendingDevicesJsonMeta =
+      const VerificationMeta('pendingDevicesJson');
+  @override
+  late final GeneratedColumn<String> pendingDevicesJson =
+      GeneratedColumn<String>(
+        'pending_devices_json',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+        defaultValue: const Constant('[]'),
+      );
+  static const VerificationMeta _serverSummaryJsonMeta = const VerificationMeta(
+    'serverSummaryJson',
+  );
+  @override
+  late final GeneratedColumn<String> serverSummaryJson =
+      GeneratedColumn<String>(
+        'server_summary_json',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
   @override
   List<GeneratedColumn> get $columns => [
     uuid,
@@ -7514,6 +8352,16 @@ class $LocalShiftsTable extends LocalShifts
     difference,
     closingNotes,
     synced,
+    closeEpoch,
+    isClosing,
+    openedByName,
+    openedDeviceName,
+    closeActualCash,
+    closedByName,
+    closedDeviceName,
+    canFinalize,
+    pendingDevicesJson,
+    serverSummaryJson,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -7609,6 +8457,90 @@ class $LocalShiftsTable extends LocalShifts
         synced.isAcceptableOrUnknown(data['synced']!, _syncedMeta),
       );
     }
+    if (data.containsKey('close_epoch')) {
+      context.handle(
+        _closeEpochMeta,
+        closeEpoch.isAcceptableOrUnknown(data['close_epoch']!, _closeEpochMeta),
+      );
+    }
+    if (data.containsKey('is_closing')) {
+      context.handle(
+        _isClosingMeta,
+        isClosing.isAcceptableOrUnknown(data['is_closing']!, _isClosingMeta),
+      );
+    }
+    if (data.containsKey('opened_by_name')) {
+      context.handle(
+        _openedByNameMeta,
+        openedByName.isAcceptableOrUnknown(
+          data['opened_by_name']!,
+          _openedByNameMeta,
+        ),
+      );
+    }
+    if (data.containsKey('opened_device_name')) {
+      context.handle(
+        _openedDeviceNameMeta,
+        openedDeviceName.isAcceptableOrUnknown(
+          data['opened_device_name']!,
+          _openedDeviceNameMeta,
+        ),
+      );
+    }
+    if (data.containsKey('close_actual_cash')) {
+      context.handle(
+        _closeActualCashMeta,
+        closeActualCash.isAcceptableOrUnknown(
+          data['close_actual_cash']!,
+          _closeActualCashMeta,
+        ),
+      );
+    }
+    if (data.containsKey('closed_by_name')) {
+      context.handle(
+        _closedByNameMeta,
+        closedByName.isAcceptableOrUnknown(
+          data['closed_by_name']!,
+          _closedByNameMeta,
+        ),
+      );
+    }
+    if (data.containsKey('closed_device_name')) {
+      context.handle(
+        _closedDeviceNameMeta,
+        closedDeviceName.isAcceptableOrUnknown(
+          data['closed_device_name']!,
+          _closedDeviceNameMeta,
+        ),
+      );
+    }
+    if (data.containsKey('can_finalize')) {
+      context.handle(
+        _canFinalizeMeta,
+        canFinalize.isAcceptableOrUnknown(
+          data['can_finalize']!,
+          _canFinalizeMeta,
+        ),
+      );
+    }
+    if (data.containsKey('pending_devices_json')) {
+      context.handle(
+        _pendingDevicesJsonMeta,
+        pendingDevicesJson.isAcceptableOrUnknown(
+          data['pending_devices_json']!,
+          _pendingDevicesJsonMeta,
+        ),
+      );
+    }
+    if (data.containsKey('server_summary_json')) {
+      context.handle(
+        _serverSummaryJsonMeta,
+        serverSummaryJson.isAcceptableOrUnknown(
+          data['server_summary_json']!,
+          _serverSummaryJsonMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -7662,6 +8594,46 @@ class $LocalShiftsTable extends LocalShifts
         DriftSqlType.bool,
         data['${effectivePrefix}synced'],
       )!,
+      closeEpoch: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}close_epoch'],
+      )!,
+      isClosing: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_closing'],
+      )!,
+      openedByName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}opened_by_name'],
+      ),
+      openedDeviceName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}opened_device_name'],
+      ),
+      closeActualCash: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}close_actual_cash'],
+      ),
+      closedByName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}closed_by_name'],
+      ),
+      closedDeviceName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}closed_device_name'],
+      ),
+      canFinalize: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}can_finalize'],
+      )!,
+      pendingDevicesJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}pending_devices_json'],
+      )!,
+      serverSummaryJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}server_summary_json'],
+      ),
     );
   }
 
@@ -7683,6 +8655,16 @@ class LocalShift extends DataClass implements Insertable<LocalShift> {
   final int? difference;
   final String? closingNotes;
   final bool synced;
+  final int closeEpoch;
+  final bool isClosing;
+  final String? openedByName;
+  final String? openedDeviceName;
+  final int? closeActualCash;
+  final String? closedByName;
+  final String? closedDeviceName;
+  final bool canFinalize;
+  final String pendingDevicesJson;
+  final String? serverSummaryJson;
   const LocalShift({
     required this.uuid,
     required this.status,
@@ -7695,6 +8677,16 @@ class LocalShift extends DataClass implements Insertable<LocalShift> {
     this.difference,
     this.closingNotes,
     required this.synced,
+    required this.closeEpoch,
+    required this.isClosing,
+    this.openedByName,
+    this.openedDeviceName,
+    this.closeActualCash,
+    this.closedByName,
+    this.closedDeviceName,
+    required this.canFinalize,
+    required this.pendingDevicesJson,
+    this.serverSummaryJson,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -7722,6 +8714,28 @@ class LocalShift extends DataClass implements Insertable<LocalShift> {
       map['closing_notes'] = Variable<String>(closingNotes);
     }
     map['synced'] = Variable<bool>(synced);
+    map['close_epoch'] = Variable<int>(closeEpoch);
+    map['is_closing'] = Variable<bool>(isClosing);
+    if (!nullToAbsent || openedByName != null) {
+      map['opened_by_name'] = Variable<String>(openedByName);
+    }
+    if (!nullToAbsent || openedDeviceName != null) {
+      map['opened_device_name'] = Variable<String>(openedDeviceName);
+    }
+    if (!nullToAbsent || closeActualCash != null) {
+      map['close_actual_cash'] = Variable<int>(closeActualCash);
+    }
+    if (!nullToAbsent || closedByName != null) {
+      map['closed_by_name'] = Variable<String>(closedByName);
+    }
+    if (!nullToAbsent || closedDeviceName != null) {
+      map['closed_device_name'] = Variable<String>(closedDeviceName);
+    }
+    map['can_finalize'] = Variable<bool>(canFinalize);
+    map['pending_devices_json'] = Variable<String>(pendingDevicesJson);
+    if (!nullToAbsent || serverSummaryJson != null) {
+      map['server_summary_json'] = Variable<String>(serverSummaryJson);
+    }
     return map;
   }
 
@@ -7750,6 +8764,28 @@ class LocalShift extends DataClass implements Insertable<LocalShift> {
           ? const Value.absent()
           : Value(closingNotes),
       synced: Value(synced),
+      closeEpoch: Value(closeEpoch),
+      isClosing: Value(isClosing),
+      openedByName: openedByName == null && nullToAbsent
+          ? const Value.absent()
+          : Value(openedByName),
+      openedDeviceName: openedDeviceName == null && nullToAbsent
+          ? const Value.absent()
+          : Value(openedDeviceName),
+      closeActualCash: closeActualCash == null && nullToAbsent
+          ? const Value.absent()
+          : Value(closeActualCash),
+      closedByName: closedByName == null && nullToAbsent
+          ? const Value.absent()
+          : Value(closedByName),
+      closedDeviceName: closedDeviceName == null && nullToAbsent
+          ? const Value.absent()
+          : Value(closedDeviceName),
+      canFinalize: Value(canFinalize),
+      pendingDevicesJson: Value(pendingDevicesJson),
+      serverSummaryJson: serverSummaryJson == null && nullToAbsent
+          ? const Value.absent()
+          : Value(serverSummaryJson),
     );
   }
 
@@ -7770,6 +8806,20 @@ class LocalShift extends DataClass implements Insertable<LocalShift> {
       difference: serializer.fromJson<int?>(json['difference']),
       closingNotes: serializer.fromJson<String?>(json['closingNotes']),
       synced: serializer.fromJson<bool>(json['synced']),
+      closeEpoch: serializer.fromJson<int>(json['closeEpoch']),
+      isClosing: serializer.fromJson<bool>(json['isClosing']),
+      openedByName: serializer.fromJson<String?>(json['openedByName']),
+      openedDeviceName: serializer.fromJson<String?>(json['openedDeviceName']),
+      closeActualCash: serializer.fromJson<int?>(json['closeActualCash']),
+      closedByName: serializer.fromJson<String?>(json['closedByName']),
+      closedDeviceName: serializer.fromJson<String?>(json['closedDeviceName']),
+      canFinalize: serializer.fromJson<bool>(json['canFinalize']),
+      pendingDevicesJson: serializer.fromJson<String>(
+        json['pendingDevicesJson'],
+      ),
+      serverSummaryJson: serializer.fromJson<String?>(
+        json['serverSummaryJson'],
+      ),
     );
   }
   @override
@@ -7787,6 +8837,16 @@ class LocalShift extends DataClass implements Insertable<LocalShift> {
       'difference': serializer.toJson<int?>(difference),
       'closingNotes': serializer.toJson<String?>(closingNotes),
       'synced': serializer.toJson<bool>(synced),
+      'closeEpoch': serializer.toJson<int>(closeEpoch),
+      'isClosing': serializer.toJson<bool>(isClosing),
+      'openedByName': serializer.toJson<String?>(openedByName),
+      'openedDeviceName': serializer.toJson<String?>(openedDeviceName),
+      'closeActualCash': serializer.toJson<int?>(closeActualCash),
+      'closedByName': serializer.toJson<String?>(closedByName),
+      'closedDeviceName': serializer.toJson<String?>(closedDeviceName),
+      'canFinalize': serializer.toJson<bool>(canFinalize),
+      'pendingDevicesJson': serializer.toJson<String>(pendingDevicesJson),
+      'serverSummaryJson': serializer.toJson<String?>(serverSummaryJson),
     };
   }
 
@@ -7802,6 +8862,16 @@ class LocalShift extends DataClass implements Insertable<LocalShift> {
     Value<int?> difference = const Value.absent(),
     Value<String?> closingNotes = const Value.absent(),
     bool? synced,
+    int? closeEpoch,
+    bool? isClosing,
+    Value<String?> openedByName = const Value.absent(),
+    Value<String?> openedDeviceName = const Value.absent(),
+    Value<int?> closeActualCash = const Value.absent(),
+    Value<String?> closedByName = const Value.absent(),
+    Value<String?> closedDeviceName = const Value.absent(),
+    bool? canFinalize,
+    String? pendingDevicesJson,
+    Value<String?> serverSummaryJson = const Value.absent(),
   }) => LocalShift(
     uuid: uuid ?? this.uuid,
     status: status ?? this.status,
@@ -7814,6 +8884,24 @@ class LocalShift extends DataClass implements Insertable<LocalShift> {
     difference: difference.present ? difference.value : this.difference,
     closingNotes: closingNotes.present ? closingNotes.value : this.closingNotes,
     synced: synced ?? this.synced,
+    closeEpoch: closeEpoch ?? this.closeEpoch,
+    isClosing: isClosing ?? this.isClosing,
+    openedByName: openedByName.present ? openedByName.value : this.openedByName,
+    openedDeviceName: openedDeviceName.present
+        ? openedDeviceName.value
+        : this.openedDeviceName,
+    closeActualCash: closeActualCash.present
+        ? closeActualCash.value
+        : this.closeActualCash,
+    closedByName: closedByName.present ? closedByName.value : this.closedByName,
+    closedDeviceName: closedDeviceName.present
+        ? closedDeviceName.value
+        : this.closedDeviceName,
+    canFinalize: canFinalize ?? this.canFinalize,
+    pendingDevicesJson: pendingDevicesJson ?? this.pendingDevicesJson,
+    serverSummaryJson: serverSummaryJson.present
+        ? serverSummaryJson.value
+        : this.serverSummaryJson,
   );
   LocalShift copyWithCompanion(LocalShiftsCompanion data) {
     return LocalShift(
@@ -7840,6 +8928,34 @@ class LocalShift extends DataClass implements Insertable<LocalShift> {
           ? data.closingNotes.value
           : this.closingNotes,
       synced: data.synced.present ? data.synced.value : this.synced,
+      closeEpoch: data.closeEpoch.present
+          ? data.closeEpoch.value
+          : this.closeEpoch,
+      isClosing: data.isClosing.present ? data.isClosing.value : this.isClosing,
+      openedByName: data.openedByName.present
+          ? data.openedByName.value
+          : this.openedByName,
+      openedDeviceName: data.openedDeviceName.present
+          ? data.openedDeviceName.value
+          : this.openedDeviceName,
+      closeActualCash: data.closeActualCash.present
+          ? data.closeActualCash.value
+          : this.closeActualCash,
+      closedByName: data.closedByName.present
+          ? data.closedByName.value
+          : this.closedByName,
+      closedDeviceName: data.closedDeviceName.present
+          ? data.closedDeviceName.value
+          : this.closedDeviceName,
+      canFinalize: data.canFinalize.present
+          ? data.canFinalize.value
+          : this.canFinalize,
+      pendingDevicesJson: data.pendingDevicesJson.present
+          ? data.pendingDevicesJson.value
+          : this.pendingDevicesJson,
+      serverSummaryJson: data.serverSummaryJson.present
+          ? data.serverSummaryJson.value
+          : this.serverSummaryJson,
     );
   }
 
@@ -7856,13 +8972,23 @@ class LocalShift extends DataClass implements Insertable<LocalShift> {
           ..write('actualCash: $actualCash, ')
           ..write('difference: $difference, ')
           ..write('closingNotes: $closingNotes, ')
-          ..write('synced: $synced')
+          ..write('synced: $synced, ')
+          ..write('closeEpoch: $closeEpoch, ')
+          ..write('isClosing: $isClosing, ')
+          ..write('openedByName: $openedByName, ')
+          ..write('openedDeviceName: $openedDeviceName, ')
+          ..write('closeActualCash: $closeActualCash, ')
+          ..write('closedByName: $closedByName, ')
+          ..write('closedDeviceName: $closedDeviceName, ')
+          ..write('canFinalize: $canFinalize, ')
+          ..write('pendingDevicesJson: $pendingDevicesJson, ')
+          ..write('serverSummaryJson: $serverSummaryJson')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
     uuid,
     status,
     openingCash,
@@ -7874,7 +9000,17 @@ class LocalShift extends DataClass implements Insertable<LocalShift> {
     difference,
     closingNotes,
     synced,
-  );
+    closeEpoch,
+    isClosing,
+    openedByName,
+    openedDeviceName,
+    closeActualCash,
+    closedByName,
+    closedDeviceName,
+    canFinalize,
+    pendingDevicesJson,
+    serverSummaryJson,
+  ]);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -7889,7 +9025,17 @@ class LocalShift extends DataClass implements Insertable<LocalShift> {
           other.actualCash == this.actualCash &&
           other.difference == this.difference &&
           other.closingNotes == this.closingNotes &&
-          other.synced == this.synced);
+          other.synced == this.synced &&
+          other.closeEpoch == this.closeEpoch &&
+          other.isClosing == this.isClosing &&
+          other.openedByName == this.openedByName &&
+          other.openedDeviceName == this.openedDeviceName &&
+          other.closeActualCash == this.closeActualCash &&
+          other.closedByName == this.closedByName &&
+          other.closedDeviceName == this.closedDeviceName &&
+          other.canFinalize == this.canFinalize &&
+          other.pendingDevicesJson == this.pendingDevicesJson &&
+          other.serverSummaryJson == this.serverSummaryJson);
 }
 
 class LocalShiftsCompanion extends UpdateCompanion<LocalShift> {
@@ -7904,6 +9050,16 @@ class LocalShiftsCompanion extends UpdateCompanion<LocalShift> {
   final Value<int?> difference;
   final Value<String?> closingNotes;
   final Value<bool> synced;
+  final Value<int> closeEpoch;
+  final Value<bool> isClosing;
+  final Value<String?> openedByName;
+  final Value<String?> openedDeviceName;
+  final Value<int?> closeActualCash;
+  final Value<String?> closedByName;
+  final Value<String?> closedDeviceName;
+  final Value<bool> canFinalize;
+  final Value<String> pendingDevicesJson;
+  final Value<String?> serverSummaryJson;
   final Value<int> rowid;
   const LocalShiftsCompanion({
     this.uuid = const Value.absent(),
@@ -7917,6 +9073,16 @@ class LocalShiftsCompanion extends UpdateCompanion<LocalShift> {
     this.difference = const Value.absent(),
     this.closingNotes = const Value.absent(),
     this.synced = const Value.absent(),
+    this.closeEpoch = const Value.absent(),
+    this.isClosing = const Value.absent(),
+    this.openedByName = const Value.absent(),
+    this.openedDeviceName = const Value.absent(),
+    this.closeActualCash = const Value.absent(),
+    this.closedByName = const Value.absent(),
+    this.closedDeviceName = const Value.absent(),
+    this.canFinalize = const Value.absent(),
+    this.pendingDevicesJson = const Value.absent(),
+    this.serverSummaryJson = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   LocalShiftsCompanion.insert({
@@ -7931,6 +9097,16 @@ class LocalShiftsCompanion extends UpdateCompanion<LocalShift> {
     this.difference = const Value.absent(),
     this.closingNotes = const Value.absent(),
     this.synced = const Value.absent(),
+    this.closeEpoch = const Value.absent(),
+    this.isClosing = const Value.absent(),
+    this.openedByName = const Value.absent(),
+    this.openedDeviceName = const Value.absent(),
+    this.closeActualCash = const Value.absent(),
+    this.closedByName = const Value.absent(),
+    this.closedDeviceName = const Value.absent(),
+    this.canFinalize = const Value.absent(),
+    this.pendingDevicesJson = const Value.absent(),
+    this.serverSummaryJson = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : uuid = Value(uuid),
        openedAt = Value(openedAt);
@@ -7946,6 +9122,16 @@ class LocalShiftsCompanion extends UpdateCompanion<LocalShift> {
     Expression<int>? difference,
     Expression<String>? closingNotes,
     Expression<bool>? synced,
+    Expression<int>? closeEpoch,
+    Expression<bool>? isClosing,
+    Expression<String>? openedByName,
+    Expression<String>? openedDeviceName,
+    Expression<int>? closeActualCash,
+    Expression<String>? closedByName,
+    Expression<String>? closedDeviceName,
+    Expression<bool>? canFinalize,
+    Expression<String>? pendingDevicesJson,
+    Expression<String>? serverSummaryJson,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -7960,6 +9146,17 @@ class LocalShiftsCompanion extends UpdateCompanion<LocalShift> {
       if (difference != null) 'difference': difference,
       if (closingNotes != null) 'closing_notes': closingNotes,
       if (synced != null) 'synced': synced,
+      if (closeEpoch != null) 'close_epoch': closeEpoch,
+      if (isClosing != null) 'is_closing': isClosing,
+      if (openedByName != null) 'opened_by_name': openedByName,
+      if (openedDeviceName != null) 'opened_device_name': openedDeviceName,
+      if (closeActualCash != null) 'close_actual_cash': closeActualCash,
+      if (closedByName != null) 'closed_by_name': closedByName,
+      if (closedDeviceName != null) 'closed_device_name': closedDeviceName,
+      if (canFinalize != null) 'can_finalize': canFinalize,
+      if (pendingDevicesJson != null)
+        'pending_devices_json': pendingDevicesJson,
+      if (serverSummaryJson != null) 'server_summary_json': serverSummaryJson,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -7976,6 +9173,16 @@ class LocalShiftsCompanion extends UpdateCompanion<LocalShift> {
     Value<int?>? difference,
     Value<String?>? closingNotes,
     Value<bool>? synced,
+    Value<int>? closeEpoch,
+    Value<bool>? isClosing,
+    Value<String?>? openedByName,
+    Value<String?>? openedDeviceName,
+    Value<int?>? closeActualCash,
+    Value<String?>? closedByName,
+    Value<String?>? closedDeviceName,
+    Value<bool>? canFinalize,
+    Value<String>? pendingDevicesJson,
+    Value<String?>? serverSummaryJson,
     Value<int>? rowid,
   }) {
     return LocalShiftsCompanion(
@@ -7990,6 +9197,16 @@ class LocalShiftsCompanion extends UpdateCompanion<LocalShift> {
       difference: difference ?? this.difference,
       closingNotes: closingNotes ?? this.closingNotes,
       synced: synced ?? this.synced,
+      closeEpoch: closeEpoch ?? this.closeEpoch,
+      isClosing: isClosing ?? this.isClosing,
+      openedByName: openedByName ?? this.openedByName,
+      openedDeviceName: openedDeviceName ?? this.openedDeviceName,
+      closeActualCash: closeActualCash ?? this.closeActualCash,
+      closedByName: closedByName ?? this.closedByName,
+      closedDeviceName: closedDeviceName ?? this.closedDeviceName,
+      canFinalize: canFinalize ?? this.canFinalize,
+      pendingDevicesJson: pendingDevicesJson ?? this.pendingDevicesJson,
+      serverSummaryJson: serverSummaryJson ?? this.serverSummaryJson,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -8030,6 +9247,36 @@ class LocalShiftsCompanion extends UpdateCompanion<LocalShift> {
     if (synced.present) {
       map['synced'] = Variable<bool>(synced.value);
     }
+    if (closeEpoch.present) {
+      map['close_epoch'] = Variable<int>(closeEpoch.value);
+    }
+    if (isClosing.present) {
+      map['is_closing'] = Variable<bool>(isClosing.value);
+    }
+    if (openedByName.present) {
+      map['opened_by_name'] = Variable<String>(openedByName.value);
+    }
+    if (openedDeviceName.present) {
+      map['opened_device_name'] = Variable<String>(openedDeviceName.value);
+    }
+    if (closeActualCash.present) {
+      map['close_actual_cash'] = Variable<int>(closeActualCash.value);
+    }
+    if (closedByName.present) {
+      map['closed_by_name'] = Variable<String>(closedByName.value);
+    }
+    if (closedDeviceName.present) {
+      map['closed_device_name'] = Variable<String>(closedDeviceName.value);
+    }
+    if (canFinalize.present) {
+      map['can_finalize'] = Variable<bool>(canFinalize.value);
+    }
+    if (pendingDevicesJson.present) {
+      map['pending_devices_json'] = Variable<String>(pendingDevicesJson.value);
+    }
+    if (serverSummaryJson.present) {
+      map['server_summary_json'] = Variable<String>(serverSummaryJson.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -8050,6 +9297,16 @@ class LocalShiftsCompanion extends UpdateCompanion<LocalShift> {
           ..write('difference: $difference, ')
           ..write('closingNotes: $closingNotes, ')
           ..write('synced: $synced, ')
+          ..write('closeEpoch: $closeEpoch, ')
+          ..write('isClosing: $isClosing, ')
+          ..write('openedByName: $openedByName, ')
+          ..write('openedDeviceName: $openedDeviceName, ')
+          ..write('closeActualCash: $closeActualCash, ')
+          ..write('closedByName: $closedByName, ')
+          ..write('closedDeviceName: $closedDeviceName, ')
+          ..write('canFinalize: $canFinalize, ')
+          ..write('pendingDevicesJson: $pendingDevicesJson, ')
+          ..write('serverSummaryJson: $serverSummaryJson, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -9993,6 +11250,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $LocalSalesTable localSales = $LocalSalesTable(this);
   late final $SaleItemsTable saleItems = $SaleItemsTable(this);
   late final $SalePaymentsTable salePayments = $SalePaymentsTable(this);
+  late final $PaymentProofUploadsTable paymentProofUploads =
+      $PaymentProofUploadsTable(this);
   late final $OutboxEventsTable outboxEvents = $OutboxEventsTable(this);
   late final $LocalShiftsTable localShifts = $LocalShiftsTable(this);
   late final $CashMovementsTable cashMovements = $CashMovementsTable(this);
@@ -10038,6 +11297,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     'sale_payments_uuid',
     'CREATE INDEX sale_payments_uuid ON sale_payments (payment_uuid)',
   );
+  late final Index paymentProofUploadsStatus = Index(
+    'payment_proof_uploads_status',
+    'CREATE INDEX payment_proof_uploads_status ON payment_proof_uploads (status, next_attempt_at)',
+  );
   late final Index outboxStatusSequence = Index(
     'outbox_status_sequence',
     'CREATE INDEX outbox_status_sequence ON outbox_events (status, sequence)',
@@ -10068,6 +11331,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     localSales,
     saleItems,
     salePayments,
+    paymentProofUploads,
     outboxEvents,
     localShifts,
     cashMovements,
@@ -10084,6 +11348,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     saleItemsSale,
     salePaymentsSale,
     salePaymentsUuid,
+    paymentProofUploadsStatus,
     outboxStatusSequence,
     localShiftsStatus,
     cashMovementsShift,
@@ -14555,6 +15820,368 @@ typedef $$SalePaymentsTableProcessedTableManager =
       SalePayment,
       PrefetchHooks Function({bool saleUuid})
     >;
+typedef $$PaymentProofUploadsTableCreateCompanionBuilder =
+    PaymentProofUploadsCompanion Function({
+      Value<int> id,
+      required String saleUuid,
+      required String paymentUuid,
+      Value<String?> idempotencyKey,
+      Value<String?> localPath,
+      Value<String> status,
+      Value<int> attempts,
+      Value<String?> lastError,
+      Value<DateTime?> nextAttemptAt,
+      Value<DateTime?> uploadedAt,
+      required DateTime createdAt,
+      required DateTime updatedAt,
+    });
+typedef $$PaymentProofUploadsTableUpdateCompanionBuilder =
+    PaymentProofUploadsCompanion Function({
+      Value<int> id,
+      Value<String> saleUuid,
+      Value<String> paymentUuid,
+      Value<String?> idempotencyKey,
+      Value<String?> localPath,
+      Value<String> status,
+      Value<int> attempts,
+      Value<String?> lastError,
+      Value<DateTime?> nextAttemptAt,
+      Value<DateTime?> uploadedAt,
+      Value<DateTime> createdAt,
+      Value<DateTime> updatedAt,
+    });
+
+class $$PaymentProofUploadsTableFilterComposer
+    extends Composer<_$AppDatabase, $PaymentProofUploadsTable> {
+  $$PaymentProofUploadsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get saleUuid => $composableBuilder(
+    column: $table.saleUuid,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get paymentUuid => $composableBuilder(
+    column: $table.paymentUuid,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get idempotencyKey => $composableBuilder(
+    column: $table.idempotencyKey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get localPath => $composableBuilder(
+    column: $table.localPath,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get attempts => $composableBuilder(
+    column: $table.attempts,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get lastError => $composableBuilder(
+    column: $table.lastError,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get nextAttemptAt => $composableBuilder(
+    column: $table.nextAttemptAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get uploadedAt => $composableBuilder(
+    column: $table.uploadedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$PaymentProofUploadsTableOrderingComposer
+    extends Composer<_$AppDatabase, $PaymentProofUploadsTable> {
+  $$PaymentProofUploadsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get saleUuid => $composableBuilder(
+    column: $table.saleUuid,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get paymentUuid => $composableBuilder(
+    column: $table.paymentUuid,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get idempotencyKey => $composableBuilder(
+    column: $table.idempotencyKey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get localPath => $composableBuilder(
+    column: $table.localPath,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get attempts => $composableBuilder(
+    column: $table.attempts,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get lastError => $composableBuilder(
+    column: $table.lastError,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get nextAttemptAt => $composableBuilder(
+    column: $table.nextAttemptAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get uploadedAt => $composableBuilder(
+    column: $table.uploadedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$PaymentProofUploadsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $PaymentProofUploadsTable> {
+  $$PaymentProofUploadsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get saleUuid =>
+      $composableBuilder(column: $table.saleUuid, builder: (column) => column);
+
+  GeneratedColumn<String> get paymentUuid => $composableBuilder(
+    column: $table.paymentUuid,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get idempotencyKey => $composableBuilder(
+    column: $table.idempotencyKey,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get localPath =>
+      $composableBuilder(column: $table.localPath, builder: (column) => column);
+
+  GeneratedColumn<String> get status =>
+      $composableBuilder(column: $table.status, builder: (column) => column);
+
+  GeneratedColumn<int> get attempts =>
+      $composableBuilder(column: $table.attempts, builder: (column) => column);
+
+  GeneratedColumn<String> get lastError =>
+      $composableBuilder(column: $table.lastError, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get nextAttemptAt => $composableBuilder(
+    column: $table.nextAttemptAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get uploadedAt => $composableBuilder(
+    column: $table.uploadedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$PaymentProofUploadsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $PaymentProofUploadsTable,
+          PaymentProofUpload,
+          $$PaymentProofUploadsTableFilterComposer,
+          $$PaymentProofUploadsTableOrderingComposer,
+          $$PaymentProofUploadsTableAnnotationComposer,
+          $$PaymentProofUploadsTableCreateCompanionBuilder,
+          $$PaymentProofUploadsTableUpdateCompanionBuilder,
+          (
+            PaymentProofUpload,
+            BaseReferences<
+              _$AppDatabase,
+              $PaymentProofUploadsTable,
+              PaymentProofUpload
+            >,
+          ),
+          PaymentProofUpload,
+          PrefetchHooks Function()
+        > {
+  $$PaymentProofUploadsTableTableManager(
+    _$AppDatabase db,
+    $PaymentProofUploadsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$PaymentProofUploadsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$PaymentProofUploadsTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$PaymentProofUploadsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<String> saleUuid = const Value.absent(),
+                Value<String> paymentUuid = const Value.absent(),
+                Value<String?> idempotencyKey = const Value.absent(),
+                Value<String?> localPath = const Value.absent(),
+                Value<String> status = const Value.absent(),
+                Value<int> attempts = const Value.absent(),
+                Value<String?> lastError = const Value.absent(),
+                Value<DateTime?> nextAttemptAt = const Value.absent(),
+                Value<DateTime?> uploadedAt = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+              }) => PaymentProofUploadsCompanion(
+                id: id,
+                saleUuid: saleUuid,
+                paymentUuid: paymentUuid,
+                idempotencyKey: idempotencyKey,
+                localPath: localPath,
+                status: status,
+                attempts: attempts,
+                lastError: lastError,
+                nextAttemptAt: nextAttemptAt,
+                uploadedAt: uploadedAt,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                required String saleUuid,
+                required String paymentUuid,
+                Value<String?> idempotencyKey = const Value.absent(),
+                Value<String?> localPath = const Value.absent(),
+                Value<String> status = const Value.absent(),
+                Value<int> attempts = const Value.absent(),
+                Value<String?> lastError = const Value.absent(),
+                Value<DateTime?> nextAttemptAt = const Value.absent(),
+                Value<DateTime?> uploadedAt = const Value.absent(),
+                required DateTime createdAt,
+                required DateTime updatedAt,
+              }) => PaymentProofUploadsCompanion.insert(
+                id: id,
+                saleUuid: saleUuid,
+                paymentUuid: paymentUuid,
+                idempotencyKey: idempotencyKey,
+                localPath: localPath,
+                status: status,
+                attempts: attempts,
+                lastError: lastError,
+                nextAttemptAt: nextAttemptAt,
+                uploadedAt: uploadedAt,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$PaymentProofUploadsTable, PaymentProofUpload>(
+                    table,
+                  ),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $PaymentProofUploadsTable,
+                    PaymentProofUpload
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$PaymentProofUploadsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $PaymentProofUploadsTable,
+      PaymentProofUpload,
+      $$PaymentProofUploadsTableFilterComposer,
+      $$PaymentProofUploadsTableOrderingComposer,
+      $$PaymentProofUploadsTableAnnotationComposer,
+      $$PaymentProofUploadsTableCreateCompanionBuilder,
+      $$PaymentProofUploadsTableUpdateCompanionBuilder,
+      (
+        PaymentProofUpload,
+        BaseReferences<
+          _$AppDatabase,
+          $PaymentProofUploadsTable,
+          PaymentProofUpload
+        >,
+      ),
+      PaymentProofUpload,
+      PrefetchHooks Function()
+    >;
 typedef $$OutboxEventsTableCreateCompanionBuilder =
     OutboxEventsCompanion Function({
       Value<int> id,
@@ -14973,6 +16600,16 @@ typedef $$LocalShiftsTableCreateCompanionBuilder =
       Value<int?> difference,
       Value<String?> closingNotes,
       Value<bool> synced,
+      Value<int> closeEpoch,
+      Value<bool> isClosing,
+      Value<String?> openedByName,
+      Value<String?> openedDeviceName,
+      Value<int?> closeActualCash,
+      Value<String?> closedByName,
+      Value<String?> closedDeviceName,
+      Value<bool> canFinalize,
+      Value<String> pendingDevicesJson,
+      Value<String?> serverSummaryJson,
       Value<int> rowid,
     });
 typedef $$LocalShiftsTableUpdateCompanionBuilder =
@@ -14988,6 +16625,16 @@ typedef $$LocalShiftsTableUpdateCompanionBuilder =
       Value<int?> difference,
       Value<String?> closingNotes,
       Value<bool> synced,
+      Value<int> closeEpoch,
+      Value<bool> isClosing,
+      Value<String?> openedByName,
+      Value<String?> openedDeviceName,
+      Value<int?> closeActualCash,
+      Value<String?> closedByName,
+      Value<String?> closedDeviceName,
+      Value<bool> canFinalize,
+      Value<String> pendingDevicesJson,
+      Value<String?> serverSummaryJson,
       Value<int> rowid,
     });
 
@@ -15075,6 +16722,56 @@ class $$LocalShiftsTableFilterComposer
 
   ColumnFilters<bool> get synced => $composableBuilder(
     column: $table.synced,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get closeEpoch => $composableBuilder(
+    column: $table.closeEpoch,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isClosing => $composableBuilder(
+    column: $table.isClosing,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get openedByName => $composableBuilder(
+    column: $table.openedByName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get openedDeviceName => $composableBuilder(
+    column: $table.openedDeviceName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get closeActualCash => $composableBuilder(
+    column: $table.closeActualCash,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get closedByName => $composableBuilder(
+    column: $table.closedByName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get closedDeviceName => $composableBuilder(
+    column: $table.closedDeviceName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get canFinalize => $composableBuilder(
+    column: $table.canFinalize,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get pendingDevicesJson => $composableBuilder(
+    column: $table.pendingDevicesJson,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get serverSummaryJson => $composableBuilder(
+    column: $table.serverSummaryJson,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -15167,6 +16864,56 @@ class $$LocalShiftsTableOrderingComposer
     column: $table.synced,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<int> get closeEpoch => $composableBuilder(
+    column: $table.closeEpoch,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get isClosing => $composableBuilder(
+    column: $table.isClosing,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get openedByName => $composableBuilder(
+    column: $table.openedByName,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get openedDeviceName => $composableBuilder(
+    column: $table.openedDeviceName,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get closeActualCash => $composableBuilder(
+    column: $table.closeActualCash,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get closedByName => $composableBuilder(
+    column: $table.closedByName,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get closedDeviceName => $composableBuilder(
+    column: $table.closedDeviceName,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get canFinalize => $composableBuilder(
+    column: $table.canFinalize,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get pendingDevicesJson => $composableBuilder(
+    column: $table.pendingDevicesJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get serverSummaryJson => $composableBuilder(
+    column: $table.serverSummaryJson,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$LocalShiftsTableAnnotationComposer
@@ -15222,6 +16969,54 @@ class $$LocalShiftsTableAnnotationComposer
 
   GeneratedColumn<bool> get synced =>
       $composableBuilder(column: $table.synced, builder: (column) => column);
+
+  GeneratedColumn<int> get closeEpoch => $composableBuilder(
+    column: $table.closeEpoch,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get isClosing =>
+      $composableBuilder(column: $table.isClosing, builder: (column) => column);
+
+  GeneratedColumn<String> get openedByName => $composableBuilder(
+    column: $table.openedByName,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get openedDeviceName => $composableBuilder(
+    column: $table.openedDeviceName,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get closeActualCash => $composableBuilder(
+    column: $table.closeActualCash,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get closedByName => $composableBuilder(
+    column: $table.closedByName,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get closedDeviceName => $composableBuilder(
+    column: $table.closedDeviceName,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get canFinalize => $composableBuilder(
+    column: $table.canFinalize,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get pendingDevicesJson => $composableBuilder(
+    column: $table.pendingDevicesJson,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get serverSummaryJson => $composableBuilder(
+    column: $table.serverSummaryJson,
+    builder: (column) => column,
+  );
 
   Expression<T> cashMovementsRefs<T extends Object>(
     Expression<T> Function($$CashMovementsTableAnnotationComposer a) f,
@@ -15288,6 +17083,16 @@ class $$LocalShiftsTableTableManager
                 Value<int?> difference = const Value.absent(),
                 Value<String?> closingNotes = const Value.absent(),
                 Value<bool> synced = const Value.absent(),
+                Value<int> closeEpoch = const Value.absent(),
+                Value<bool> isClosing = const Value.absent(),
+                Value<String?> openedByName = const Value.absent(),
+                Value<String?> openedDeviceName = const Value.absent(),
+                Value<int?> closeActualCash = const Value.absent(),
+                Value<String?> closedByName = const Value.absent(),
+                Value<String?> closedDeviceName = const Value.absent(),
+                Value<bool> canFinalize = const Value.absent(),
+                Value<String> pendingDevicesJson = const Value.absent(),
+                Value<String?> serverSummaryJson = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => LocalShiftsCompanion(
                 uuid: uuid,
@@ -15301,6 +17106,16 @@ class $$LocalShiftsTableTableManager
                 difference: difference,
                 closingNotes: closingNotes,
                 synced: synced,
+                closeEpoch: closeEpoch,
+                isClosing: isClosing,
+                openedByName: openedByName,
+                openedDeviceName: openedDeviceName,
+                closeActualCash: closeActualCash,
+                closedByName: closedByName,
+                closedDeviceName: closedDeviceName,
+                canFinalize: canFinalize,
+                pendingDevicesJson: pendingDevicesJson,
+                serverSummaryJson: serverSummaryJson,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -15316,6 +17131,16 @@ class $$LocalShiftsTableTableManager
                 Value<int?> difference = const Value.absent(),
                 Value<String?> closingNotes = const Value.absent(),
                 Value<bool> synced = const Value.absent(),
+                Value<int> closeEpoch = const Value.absent(),
+                Value<bool> isClosing = const Value.absent(),
+                Value<String?> openedByName = const Value.absent(),
+                Value<String?> openedDeviceName = const Value.absent(),
+                Value<int?> closeActualCash = const Value.absent(),
+                Value<String?> closedByName = const Value.absent(),
+                Value<String?> closedDeviceName = const Value.absent(),
+                Value<bool> canFinalize = const Value.absent(),
+                Value<String> pendingDevicesJson = const Value.absent(),
+                Value<String?> serverSummaryJson = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => LocalShiftsCompanion.insert(
                 uuid: uuid,
@@ -15329,6 +17154,16 @@ class $$LocalShiftsTableTableManager
                 difference: difference,
                 closingNotes: closingNotes,
                 synced: synced,
+                closeEpoch: closeEpoch,
+                isClosing: isClosing,
+                openedByName: openedByName,
+                openedDeviceName: openedDeviceName,
+                closeActualCash: closeActualCash,
+                closedByName: closedByName,
+                closedDeviceName: closedDeviceName,
+                canFinalize: canFinalize,
+                pendingDevicesJson: pendingDevicesJson,
+                serverSummaryJson: serverSummaryJson,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -16599,6 +18434,8 @@ class $AppDatabaseManager {
       $$SaleItemsTableTableManager(_db, _db.saleItems);
   $$SalePaymentsTableTableManager get salePayments =>
       $$SalePaymentsTableTableManager(_db, _db.salePayments);
+  $$PaymentProofUploadsTableTableManager get paymentProofUploads =>
+      $$PaymentProofUploadsTableTableManager(_db, _db.paymentProofUploads);
   $$OutboxEventsTableTableManager get outboxEvents =>
       $$OutboxEventsTableTableManager(_db, _db.outboxEvents);
   $$LocalShiftsTableTableManager get localShifts =>

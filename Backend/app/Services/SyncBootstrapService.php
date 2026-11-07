@@ -19,7 +19,10 @@ class SyncBootstrapService
 {
     public const OFFLINE_CATALOG_MAX_AGE_HOURS = 72;
 
-    public function __construct(private readonly SyncPullService $pull) {}
+    public function __construct(
+        private readonly SyncPullService $pull,
+        private readonly ShiftSyncCoordinator $shifts,
+    ) {}
 
     public function bootstrap(User $user, Device $device): array
     {
@@ -50,13 +53,16 @@ class SyncBootstrapService
             ->get();
 
         $openShift = Shift::query()
-            ->with(['cashier:id,name', 'device:id,name,terminal_code', 'outlet:id,name,code'])
             ->where('business_id', $business->id)
             ->where('outlet_id', $device->outlet_id)
-            ->where('device_id', $device->id)
-            ->where('status', Shift::STATUS_OPEN)
+            ->whereIn('status', [Shift::STATUS_OPEN, Shift::STATUS_CLOSING])
             ->latest('opened_at')
             ->first();
+
+        if ($openShift) {
+            $this->shifts->registerParticipant($openShift, $device, $user, true);
+            $openShift = $this->shifts->decorate($openShift);
+        }
 
         $catalogVersion = collect([
             Product::query()->where('business_id', $business->id)->max('updated_at'),
@@ -115,6 +121,7 @@ class SyncBootstrapService
                     SalePayment::METHOD_TRANSFER,
                     SalePayment::METHOD_EWALLET,
                 ],
+                'non_cash_proof_required' => (bool) $business->non_cash_proof_required,
                 'order_types' => ['dine_in', 'take_away', 'delivery'],
                 'offline_lease_max_hours' => OfflineLeaseService::MAX_HOURS,
                 'sync' => [

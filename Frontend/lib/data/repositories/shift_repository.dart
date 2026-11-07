@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:drift/drift.dart';
 
 import '../../core/database/app_database.dart';
@@ -18,7 +20,7 @@ class ShiftRepository {
   Future<ShiftRecord?> activeShift() async {
     final row =
         await (_db.select(_db.localShifts)
-              ..where((shift) => shift.status.equals('open'))
+              ..where((shift) => shift.status.isIn(const ['open', 'closing']))
               ..orderBy([(shift) => OrderingTerm.desc(shift.openedAt)])
               ..limit(1))
             .getSingleOrNull();
@@ -32,7 +34,65 @@ class ShiftRepository {
     return row == null ? null : _toRecord(row);
   }
 
+  /// Fetches the single outlet shift every device in this outlet shares.
+  ///
+  /// The server is authoritative while reachable. If the server reports no
+  /// active shift, a previously synced local shift is marked `closed_remote`
+  /// so POS refuses further transactions. A locally opened, still unsynced
+  /// shift is kept as-is until it can be pushed.
+  Future<ShiftRecord?> refreshActiveFromServer() async {
+    final local = await activeShift();
+    final ApiResult result;
+    try {
+      result = await _api.get('shifts/active');
+    } on AppException catch (error) {
+      if (error.isNetwork) return local;
+      rethrow;
+    }
+
+    if (result.data == null) {
+      if (local != null && local.synced) {
+        await _writeRecord(
+          local.copyWith(
+            status: 'closed_remote',
+            isClosing: false,
+            canFinalize: false,
+            pendingDevices: const [],
+          ),
+          synced: true,
+        );
+        return null;
+      }
+      return local;
+    }
+
+    final remote = _recordFromServer(asMap(result.data));
+    if (remote.uuid.isEmpty) return local;
+
+    await _db.transaction(() async {
+      if (local != null && local.uuid != remote.uuid) {
+        // Never merge two shifts silently. The local shift stays readable but
+        // stops accepting transactions once the server has another active one.
+        await _writeRecord(
+          local.copyWith(
+            status: local.synced ? 'closed_remote' : 'closed_sync_exception',
+            isClosing: false,
+            canFinalize: false,
+            pendingDevices: const [],
+          ),
+          synced: local.synced,
+        );
+      }
+      await _writeRecord(remote, synced: true);
+    });
+    return remote;
+  }
+
   Future<ShiftSummary> summary(ShiftRecord shift) async {
+    if (shift.serverSummary != null) {
+      return ShiftSummary.fromServer(shift);
+    }
+
     final paymentTotals = await _db
         .customSelect(
           '''
@@ -108,7 +168,7 @@ class ShiftRepository {
     required String openingNotes,
   }) async {
     final existing = await activeShift();
-    if (existing != null) {
+    if (existing != null && existing.isActive) {
       return (shift: existing, storedOffline: !existing.synced);
     }
 
@@ -122,9 +182,18 @@ class ShiftRepository {
         },
       );
       final remote = _recordFromServer(asMap(result.data));
-      await _insertLocal(remote, synced: true);
+      await _writeRecord(remote, synced: true);
       return (shift: remote, storedOffline: false);
     } on AppException catch (error) {
+      if (error.code == 'SHIFT_ALREADY_OPEN') {
+        // Another device won the race. Adopt the outlet shift instead of
+        // creating a second local one.
+        final active = await refreshActiveFromServer();
+        if (active != null) {
+          return (shift: active, storedOffline: false);
+        }
+        rethrow;
+      }
       if (!error.isNetwork) rethrow;
       return _openOffline(openingCash, openingNotes);
     }
@@ -146,7 +215,7 @@ class ShiftRepository {
     );
 
     await _db.transaction(() async {
-      await _insertLocal(record, synced: false);
+      await _writeRecord(record, synced: false);
       await _outbox.append(
         eventId: newUuid(),
         eventType: 'shift.opened',
@@ -172,21 +241,40 @@ class ShiftRepository {
     required int amount,
     required String reason,
   }) async {
-    if (shift.synced) {
-      await _api.post(
-        'shifts/${shift.uuid}/cash-movements',
-        body: {'type': type, 'amount': amount, 'reason': reason},
+    final movementType = switch (type) {
+      'cash_in' || 'in' => 'in',
+      'cash_out' || 'out' => 'out',
+      _ => throw const AppException(
+        'INVALID_CASH_MOVEMENT_TYPE',
+        'Jenis pergerakan kas tidak valid.',
+      ),
+    };
+
+    if (!shift.acceptsTransactions) {
+      throw const AppException(
+        'SHIFT_CLOSING',
+        'Shift sedang ditutup atau sudah tutup. Kas masuk/keluar tidak dapat dicatat.',
+        statusCode: 409,
       );
+    }
+
+    if (shift.synced) {
+      final result = await _api.post(
+        'shifts/${shift.uuid}/cash-movements',
+        body: {'type': movementType, 'amount': amount, 'reason': reason},
+      );
+      final remote = _recordFromServer(asMap(result.data));
       await _insertMovement(
         uuid: newUuid(),
         shiftUuid: shift.uuid,
-        type: type,
+        type: movementType,
         amount: amount,
         reason: reason,
         occurredAt: DateTime.now(),
         synced: true,
       );
-      return shift;
+      await _writeRecord(remote, synced: true);
+      return remote;
     }
 
     final now = DateTime.now();
@@ -195,7 +283,7 @@ class ShiftRepository {
       await _insertMovement(
         uuid: uuid,
         shiftUuid: shift.uuid,
-        type: type,
+        type: movementType,
         amount: amount,
         reason: reason,
         occurredAt: now,
@@ -210,7 +298,7 @@ class ShiftRepository {
         payload: {
           'shift_uuid': shift.uuid,
           'movement_uuid': uuid,
-          'type': type,
+          'type': movementType,
           'amount': amount,
           'reason': reason,
           'occurred_at': now.toIso8601String(),
@@ -220,133 +308,98 @@ class ShiftRepository {
     return shift;
   }
 
+  /// Requests the close and returns the server state.
+  ///
+  /// The shift usually returns as `closing`; the server finalizes it only
+  /// after every participating device has checkpointed for the close epoch.
+  /// Closing is intentionally online-only: a local snapshot must never look
+  /// complete while other devices still hold unsynced transactions.
   Future<ShiftRecord> close({
     required ShiftSummary summary,
     required int actualCash,
     String? closingNotes,
   }) async {
     final shift = summary.shift;
-    final pending = await _outbox.pendingCount();
-    final sequence = await _outbox.maxSequence();
-
-    if (shift.synced && pending == 0) {
-      try {
-        final result = await _api.post(
-          'shifts/close',
-          body: {
-            'shift_uuid': shift.uuid,
-            'actual_cash': actualCash,
-            'closing_notes': closingNotes,
-            'pending_sync_count': 0,
-            'local_event_sequence': sequence,
-            'closed_at': DateTime.now().toIso8601String(),
-          },
-        );
-        final remote = _recordFromServer(asMap(result.data));
-        await _updateClosed(
-          remote: remote,
-          actualCash: actualCash,
-          closingNotes: closingNotes,
-          expectedCash: summary.expectedCash,
-          synced: true,
-        );
-        return remote;
-      } on AppException catch (error) {
-        if (error.code == 'SHIFT_NOT_OPEN') {
-          final remote = await fetchRemoteShift(shift.uuid);
-          if (remote != null) return remote;
-        }
-        rethrow;
-      }
+    if (!shift.isActive) {
+      throw const AppException(
+        'SHIFT_NOT_OPEN',
+        'Shift sudah ditutup dan tidak dapat ditutup ulang.',
+      );
     }
 
-    final now = DateTime.now();
-    final status = 'closed_pending_sync';
-    final record = shift.copyWith(
-      status: status,
-      closedAt: now,
-      expectedCash: summary.expectedCash,
-      actualCash: actualCash,
-      difference: actualCash - summary.expectedCash,
-      closingNotes: closingNotes,
-      synced: false,
-    );
-
-    await _db.transaction(() async {
-      await (_db.update(
-        _db.localShifts,
-      )..where((row) => row.uuid.equals(shift.uuid))).write(
-        LocalShiftsCompanion(
-          status: Value(status),
-          closedAt: Value(now),
-          expectedCash: Value(summary.expectedCash),
-          actualCash: Value(actualCash),
-          difference: Value(actualCash - summary.expectedCash),
-          closingNotes: Value(closingNotes),
-          synced: const Value(false),
-        ),
+    final pending = await _outbox.pendingCount();
+    if (pending > 0) {
+      throw AppException(
+        'SHIFT_DEVICE_OUTBOX_NOT_DRAINED',
+        'Masih ada $pending event lokal yang belum terkirim. Sinkronkan '
+            'perangkat ini sebelum menutup shift.',
+        statusCode: 409,
+        retryable: true,
       );
-      await _outbox.append(
-        eventId: newUuid(),
-        eventType: 'shift.closed',
-        aggregateType: 'shift',
-        aggregateId: shift.uuid,
-        occurredAt: now,
-        payload: {
+    }
+
+    final sequence = await _outbox.maxSequence();
+    try {
+      final result = await _api.post(
+        'shifts/close',
+        body: {
           'shift_uuid': shift.uuid,
-          'opening_cash': summary.shift.openingCash,
-          'cash_tendered': summary.cashTendered,
-          'cash_change': summary.cashChange,
-          'cash_in': summary.cashIn,
-          'cash_out': summary.cashOut,
-          'cash_refund': summary.cashRefund,
-          'expected_cash': summary.expectedCash,
           'actual_cash': actualCash,
-          'variance': actualCash - summary.expectedCash,
-          'confirmed_noncash': summary.confirmedNonCash,
-          'awaiting_verification_amount': summary.awaitingVerification,
-          'local_transaction_count': summary.transactionCount,
-          'pending_sync_count': pending + 1,
-          'local_event_sequence': sequence,
           'closing_notes': closingNotes,
-          'closed_at': now.toIso8601String(),
+          'pending_sync_count': 0,
+          'local_event_sequence': sequence,
+          'closed_at': DateTime.now().toIso8601String(),
         },
       );
-    });
+      final remote = _recordFromServer(asMap(result.data));
+      await _writeRecord(remote, synced: true);
+      return remote;
+    } on AppException catch (error) {
+      if (error.isNetwork) {
+        throw const AppException(
+          'SHIFT_CLOSE_REQUIRES_SYNC',
+          'Penutupan shift memerlukan koneksi ke server agar transaksi semua '
+              'perangkat dapat dipastikan lengkap. Sinkronkan lalu coba lagi.',
+          retryable: true,
+        );
+      }
+      rethrow;
+    }
+  }
 
-    return record;
+  Future<ShiftRecord> checkpoint(ShiftRecord shift) async {
+    final pending = await _outbox.pendingCount();
+    if (pending > 0) {
+      throw AppException(
+        'SHIFT_DEVICE_OUTBOX_NOT_DRAINED',
+        'Masih ada $pending event lokal yang belum terkirim. Sinkronkan '
+            'perangkat ini terlebih dahulu.',
+        statusCode: 409,
+        retryable: true,
+      );
+    }
+
+    final result = await _api.post(
+      'shifts/${shift.uuid}/sync-checkpoint',
+      body: {
+        'close_epoch': shift.closeEpoch,
+        'pending_outbox_count': 0,
+        'last_sequence': await _outbox.maxSequence(),
+      },
+    );
+    final remote = _recordFromServer(asMap(result.data));
+    await _writeRecord(remote, synced: true);
+    return remote;
   }
 
   Future<ShiftRecord?> fetchRemoteShift(String uuid) async {
     final result = await _api.get('shifts/$uuid');
     final remote = _recordFromServer(asMap(result.data));
-    await _insertLocal(remote, synced: true);
+    await _writeRecord(remote, synced: true);
     return remote;
   }
 
-  Future<void> _updateClosed({
-    required ShiftRecord remote,
-    required int actualCash,
-    required String? closingNotes,
-    required int expectedCash,
-    required bool synced,
-  }) async {
-    await (_db.update(
-      _db.localShifts,
-    )..where((row) => row.uuid.equals(remote.uuid))).write(
-      LocalShiftsCompanion(
-        status: Value(remote.status),
-        closedAt: Value(remote.closedAt ?? DateTime.now()),
-        expectedCash: Value(remote.expectedCash ?? expectedCash),
-        actualCash: Value(actualCash),
-        difference: Value(actualCash - (remote.expectedCash ?? expectedCash)),
-        closingNotes: Value(closingNotes),
-        synced: Value(synced),
-      ),
-    );
-  }
-
-  Future<void> _insertLocal(ShiftRecord record, {required bool synced}) async {
+  Future<void> _writeRecord(ShiftRecord record, {required bool synced}) async {
     await _db
         .into(_db.localShifts)
         .insertOnConflictUpdate(
@@ -362,6 +415,26 @@ class ShiftRepository {
             difference: Value(record.difference),
             closingNotes: Value(record.closingNotes),
             synced: Value(synced),
+            closeEpoch: Value(record.closeEpoch),
+            isClosing: Value(record.status == 'closing' || record.isClosing),
+            openedByName: Value(record.openedByName),
+            openedDeviceName: Value(record.openedDeviceName),
+            closeActualCash: Value(record.closeActualCash),
+            closedByName: Value(record.closedByName),
+            closedDeviceName: Value(record.closedDeviceName),
+            canFinalize: Value(record.canFinalize),
+            pendingDevicesJson: Value(
+              jsonEncode(
+                record.pendingDevices
+                    .map((device) => device.toJson())
+                    .toList(),
+              ),
+            ),
+            serverSummaryJson: Value(
+              record.serverSummary == null
+                  ? null
+                  : jsonEncode(record.serverSummary!.toJson()),
+            ),
           ),
         );
   }
@@ -391,6 +464,16 @@ class ShiftRepository {
   }
 
   ShiftRecord _recordFromServer(Map<String, dynamic> json) {
+    final openedBy = asMapOrNull(json['opened_by']);
+    final openedDevice = asMapOrNull(json['opened_device']);
+    final closedBy = asMapOrNull(json['closed_by']);
+    final closedDevice = asMapOrNull(json['closed_device']);
+    final summary = asMapOrNull(json['summary']);
+    final sync = asMapOrNull(json['sync']);
+    final pending = asMapList(
+      json['pending_devices'] ?? sync?['pending_devices'],
+    ).map(ShiftPendingDevice.fromJson).toList(growable: false);
+
     return ShiftRecord(
       uuid: asStringOr(json['uuid'], ''),
       status: asStringOr(json['status'], 'open'),
@@ -403,6 +486,22 @@ class ShiftRepository {
       difference: asIntOrNull(json['variance']),
       closingNotes: asStringOrNull(json['closing_notes']),
       synced: true,
+      closeEpoch: asIntOr(json['close_epoch'], 0),
+      isClosing: asBool(json['is_closing'], false),
+      openedByName: openedBy == null ? null : asStringOrNull(openedBy['name']),
+      openedDeviceName: openedDevice == null
+          ? null
+          : asStringOrNull(openedDevice['name']),
+      closeActualCash: asIntOrNull(json['close_actual_cash']),
+      closedByName: closedBy == null ? null : asStringOrNull(closedBy['name']),
+      closedDeviceName: closedDevice == null
+          ? null
+          : asStringOrNull(closedDevice['name']),
+      canFinalize: asBool(json['can_finalize']),
+      pendingDevices: pending,
+      serverSummary: summary == null
+          ? null
+          : ShiftServerSummary.fromJson(summary),
     );
   }
 
@@ -419,6 +518,40 @@ class ShiftRepository {
       difference: row.difference,
       closingNotes: row.closingNotes,
       synced: row.synced,
+      closeEpoch: row.closeEpoch,
+      isClosing: row.isClosing,
+      openedByName: row.openedByName,
+      openedDeviceName: row.openedDeviceName,
+      closeActualCash: row.closeActualCash,
+      closedByName: row.closedByName,
+      closedDeviceName: row.closedDeviceName,
+      canFinalize: row.canFinalize,
+      pendingDevices: _decodePending(row.pendingDevicesJson),
+      serverSummary: _decodeSummary(row.serverSummaryJson),
     );
+  }
+
+  List<ShiftPendingDevice> _decodePending(String raw) {
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const [];
+      return decoded
+          .whereType<Map>()
+          .map((item) => ShiftPendingDevice.fromJson(asMap(item)))
+          .toList(growable: false);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  ShiftServerSummary? _decodeSummary(String? raw) {
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return null;
+      return ShiftServerSummary.fromJson(asMap(decoded));
+    } catch (_) {
+      return null;
+    }
   }
 }

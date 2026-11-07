@@ -16,6 +16,7 @@ class ShiftCashMovement extends Model
         'amount',
         'reason',
         'created_by',
+        'device_id',
         'occurred_at',
     ];
 
@@ -35,5 +36,10 @@ class ShiftCashMovement extends Model
     public function createdBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'created_by');
+    }
+
+    public function device(): BelongsTo
+    {
+        return $this->belongsTo(Device::class);
     }
 }

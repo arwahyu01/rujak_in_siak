@@ -3,7 +3,12 @@
 namespace Tests\Feature;
 
 use App\Models\AuthorizationLease;
+use App\Models\Device;
 use App\Models\Order;
+use App\Models\Sale;
+use App\Models\SalePayment;
+use App\Models\Shift;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
@@ -16,12 +21,15 @@ class ApiSyncTest extends TestCase
     use CreatesApiContext;
     use RefreshDatabase;
 
+    private Shift $activeShift;
+
     protected function setUp(): void
     {
         parent::setUp();
 
         $this->createApiContext();
         Sanctum::actingAs($this->owner, ['api']);
+        $this->activeShift = $this->openShift($this->owner);
     }
 
     public function test_push_accepts_order_and_handles_duplicate_and_idempotency_conflicts(): void
@@ -153,9 +161,7 @@ class ApiSyncTest extends TestCase
     public function test_bootstrap_returns_device_config_catalog_and_open_shift(): void
     {
         $product = $this->makeProduct(8000);
-        $shiftUuid = $this->postJson('/api/v1/shifts/open', [
-            'opening_cash' => 50000,
-        ], $this->headers($this->owner))->assertCreated()->json('data.uuid');
+        $shiftUuid = $this->activeShift->uuid;
 
         $response = $this->getJson('/api/v1/sync/bootstrap', $this->headers($this->owner))->assertOk();
 
@@ -175,6 +181,181 @@ class ApiSyncTest extends TestCase
         );
 
         $this->assertNotEmpty($response->json('data.sync.cursor'));
+
+        $cashier = $this->makeUser('kasir.sync@rujak.test', 'kasirsync', 'kasir');
+        $cashierDevice = $this->makeDevice('T08');
+
+        Sanctum::actingAs($cashier, ['api']);
+
+        $cashierBootstrap = $this->getJson(
+            '/api/v1/sync/bootstrap',
+            $this->headers($cashier, $cashierDevice),
+        )->assertOk();
+
+        $cashierBootstrap->assertJsonPath('data.open_shift.uuid', $shiftUuid)
+            ->assertJsonPath('data.open_shift.opened_by.uuid', $this->owner->uuid)
+            ->assertJsonPath('data.open_shift.opened_device.uuid', $this->device->uuid);
+
+        $this->assertContains(
+            $cashierDevice->uuid,
+            collect($cashierBootstrap->json('data.open_shift.sync.participants'))->pluck('device_uuid')->all(),
+        );
+    }
+
+    public function test_cashier_device_can_sync_transactions_against_owner_shift_without_local_shift_opened(): void
+    {
+        $cashier = $this->makeUser('kasir.push@rujak.test', 'kasirpush', 'kasir');
+        $cashierDevice = $this->makeDevice('T09');
+
+        Sanctum::actingAs($cashier, ['api']);
+
+        $orderUuid = (string) Str::uuid();
+        $payload = $this->orderPayload($orderUuid) + ['shift_uuid' => $this->activeShift->uuid];
+        $event = $this->event('order.created', $payload, 1);
+
+        $this->push([$event], user: $cashier, device: $cashierDevice)
+            ->assertOk()
+            ->assertJsonPath('data.results.0.status', 'accepted');
+
+        $order = Order::query()->where('uuid', $orderUuid)->firstOrFail();
+        $this->assertSame($this->activeShift->id, (int) $order->shift_id);
+        $this->assertSame($cashier->id, (int) $order->user_id);
+        $this->assertSame($cashierDevice->id, (int) $order->device_id);
+
+        $this->push([$event], user: $cashier, device: $cashierDevice)
+            ->assertOk()
+            ->assertJsonPath('data.results.0.status', 'duplicate');
+
+        $this->assertDatabaseHas('shift_devices', [
+            'shift_id' => $this->activeShift->id,
+            'device_id' => $cashierDevice->id,
+        ]);
+    }
+
+    public function test_owner_offline_checkout_confirms_non_cash_payment(): void
+    {
+        $orderUuid = (string) Str::uuid();
+        $saleUuid = (string) Str::uuid();
+        $paymentUuid = (string) Str::uuid();
+
+        $this->push([
+            $this->event('order.created', $this->orderPayload($orderUuid, 15000), 1),
+        ])->assertOk()->assertJsonPath('data.results.0.status', 'accepted');
+
+        $response = $this->push([
+            $this->event('sale.finalized', [
+                'sale_uuid' => $saleUuid,
+                'order_uuid' => $orderUuid,
+                'source_order_version' => 1,
+                'receipt_number' => 'RJS-PUSAT-T01-0000000001',
+                'shift_uuid' => $this->activeShift->uuid,
+                'subtotal' => 15000,
+                'item_discount_total' => 0,
+                'transaction_discount_total' => 0,
+                'discount_total' => 0,
+                'service_charge' => 0,
+                'tax_total' => 0,
+                'total' => 15000,
+                'transacted_at' => now()->toIso8601String(),
+                'payments' => [[
+                    'payment_uuid' => $paymentUuid,
+                    'idempotency_key' => 'offline-payment-1',
+                    'method' => SalePayment::METHOD_QRIS,
+                    'amount' => 15000,
+                    'provider_reference' => 'QR-OFFLINE',
+                    'status' => SalePayment::STATUS_AWAITING_VERIFICATION,
+                    'recorded_at' => now()->toIso8601String(),
+                ]],
+            ], 2),
+        ]);
+        $response->assertOk()->assertJsonPath('data.results.0.status', 'accepted');
+
+        $payment = SalePayment::query()->where('uuid', $paymentUuid)->firstOrFail();
+        $this->assertSame(SalePayment::STATUS_CONFIRMED, $payment->status);
+        $this->assertSame($this->owner->id, (int) $payment->verified_by);
+        $this->assertSame(15000, (int) $payment->verified_amount);
+
+        $sale = Sale::query()->where('uuid', $response->json('data.results.0.server_record_id'))->firstOrFail();
+        $this->assertSame(Sale::PAYMENT_PAID, $sale->payment_status);
+        $this->assertSame(15000, (int) $sale->confirmed_amount);
+        $this->assertSame(0, (int) $sale->awaiting_verification_amount);
+    }
+
+    public function test_cashier_synced_non_cash_payment_snapshots_proof_requirement(): void
+    {
+        $this->business->update(['non_cash_proof_required' => true]);
+        $cashier = $this->makeUser('kasir.proof@rujak.test', 'kasirproof', 'kasir');
+        $cashierDevice = $this->makeDevice('T10');
+        Sanctum::actingAs($cashier, ['api']);
+
+        $orderUuid = (string) Str::uuid();
+        $saleUuid = (string) Str::uuid();
+        $paymentUuid = (string) Str::uuid();
+
+        $this->push([$this->event(
+            'order.created',
+            $this->orderPayload($orderUuid, 15000) + ['shift_uuid' => $this->activeShift->uuid],
+            1,
+        )], user: $cashier, device: $cashierDevice)
+            ->assertOk()
+            ->assertJsonPath('data.results.0.status', 'accepted');
+
+        $this->push([$this->event('sale.finalized', [
+            'sale_uuid' => $saleUuid,
+            'order_uuid' => $orderUuid,
+            'source_order_version' => 1,
+            'receipt_number' => 'RJS-PUSAT-T10-0000000001',
+            'shift_uuid' => $this->activeShift->uuid,
+            'subtotal' => 15000,
+            'item_discount_total' => 0,
+            'transaction_discount_total' => 0,
+            'discount_total' => 0,
+            'service_charge' => 0,
+            'tax_total' => 0,
+            'total' => 15000,
+            'transacted_at' => now()->toIso8601String(),
+            'payments' => [[
+                'payment_uuid' => $paymentUuid,
+                'idempotency_key' => 'offline-proof-1',
+                'method' => SalePayment::METHOD_QRIS,
+                'amount' => 15000,
+                'recorded_at' => now()->toIso8601String(),
+            ]],
+        ], 2)], user: $cashier, device: $cashierDevice)
+            ->assertOk()
+            ->assertJsonPath('data.results.0.status', 'accepted');
+
+        $payment = SalePayment::query()->where('uuid', $paymentUuid)->firstOrFail();
+        $this->assertSame(SalePayment::STATUS_AWAITING_VERIFICATION, $payment->status);
+        $this->assertTrue((bool) $payment->proof_required);
+        $this->assertNull($payment->proof_path);
+        $this->assertNull($payment->provider_reference);
+    }
+
+    public function test_late_transaction_event_after_close_is_stored_as_conflict_without_touching_snapshot(): void
+    {
+        $this->postJson('/api/v1/shifts/close', [
+            'shift_uuid' => $this->activeShift->uuid,
+            'actual_cash' => 100000,
+        ], $this->headers($this->owner))->assertOk()->assertJsonPath('data.status', 'closed_confirmed');
+
+        $orderUuid = (string) Str::uuid();
+        $event = $this->event(
+            'order.created',
+            $this->orderPayload($orderUuid) + ['shift_uuid' => $this->activeShift->uuid],
+            2,
+        );
+
+        $this->push([$event])->assertOk()
+            ->assertJsonPath('data.results.0.status', 'conflict')
+            ->assertJsonPath('data.results.0.error_code', 'SHIFT_CLOSED_LATE_EVENT');
+
+        $this->assertDatabaseMissing('orders', ['uuid' => $orderUuid]);
+        $this->assertDatabaseCount('shift_closing_snapshots', 1);
+        $this->assertSame(
+            'closed_confirmed',
+            $this->activeShift->refresh()->status,
+        );
     }
 
     public function test_status_reports_device_and_event_counters(): void
@@ -195,21 +376,30 @@ class ApiSyncTest extends TestCase
         $this->assertGreaterThanOrEqual(1, $status->json('data.device.last_sequence'));
     }
 
-    private function push(array $events, string $origin = 'online', ?string $leaseToken = null): TestResponse
-    {
+    private function push(
+        array $events,
+        string $origin = 'online',
+        ?string $leaseToken = null,
+        ?User $user = null,
+        ?Device $device = null,
+    ): TestResponse {
         return $this->postJson(
             '/api/v1/sync/push',
-            $this->batch($events, $origin, $leaseToken),
-            $this->headers($this->owner),
+            $this->batch($events, $origin, $leaseToken, $device),
+            $this->headers($user ?? $this->owner, $device),
         );
     }
 
-    private function batch(array $events, string $origin = 'online', ?string $leaseToken = null): array
-    {
+    private function batch(
+        array $events,
+        string $origin = 'online',
+        ?string $leaseToken = null,
+        ?Device $device = null,
+    ): array {
         return [
             'protocol_version' => 1,
             'batch_id' => (string) Str::uuid(),
-            'device_id' => $this->device->uuid,
+            'device_id' => ($device ?? $this->device)->uuid,
             'outlet_id' => $this->outlet->uuid,
             'origin' => $origin,
             'lease_token' => $leaseToken,

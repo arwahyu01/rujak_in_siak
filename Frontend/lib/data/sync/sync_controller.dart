@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/errors/app_exception.dart';
 import '../../core/providers.dart';
 import '../bootstrap/bootstrap_controller.dart';
 import '../session/session_controller.dart';
+import '../shifts/shift_controller.dart';
 import 'sync_repository.dart';
 
 class SyncReport {
@@ -122,6 +125,16 @@ class SyncController extends AsyncNotifier<SyncStatusSnapshot> {
           // wait for the next connectivity window.
         }
       }
+
+      // Push/pull may have finalized a closing shift on another device or
+      // changed the shared shift owner; refresh the shared state immediately.
+      try {
+        await ref.read(shiftProvider.notifier).refresh();
+      } on AppException {
+        // The local shift copy is still usable; the next screen load retries.
+      }
+
+      unawaited(ref.read(paymentProofQueueProvider).drain());
 
       final status = await repository.status();
       state = AsyncData(status);

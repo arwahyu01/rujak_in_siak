@@ -16,7 +16,7 @@ class RegisterDeviceRequest extends FormRequest
         return [
             'uuid' => ['required', 'uuid'],
             'name' => ['required', 'string', 'max:120'],
-            'terminal_code' => ['required', 'string', 'max:20', 'regex:/^[A-Za-z0-9_-]+$/'],
+            'terminal_code' => ['sometimes', 'nullable', 'string', 'max:20', 'regex:/^[A-Za-z0-9_-]+$/'],
             'platform' => ['nullable', 'in:android,ios,web'],
             'app_version' => ['nullable', 'string', 'max:40'],
             'device_fingerprint' => ['nullable', 'string', 'max:191'],

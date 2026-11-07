@@ -2,9 +2,11 @@
 
 namespace App\Services;
 
+use App\Actions\Shifts\CloseShift;
 use App\Exceptions\ApiException;
 use App\Models\Device;
 use App\Models\Order;
+use App\Models\Outlet;
 use App\Models\Product;
 use App\Models\Sale;
 use App\Models\SalePayment;
@@ -26,6 +28,7 @@ class SyncEventApplier
         private readonly ReceiptNumberService $receipts,
         private readonly OrderNumberService $orderNumbers,
         private readonly ShiftSummaryService $shiftSummary,
+        private readonly ShiftSyncCoordinator $shifts,
     ) {}
 
     /**
@@ -94,12 +97,14 @@ class SyncEventApplier
 
         $this->assertTotals($payload);
 
+        $shift = $this->resolveTransactionShift($payload['shift_uuid'] ?? null, $device);
+
         $order = Order::create([
             'uuid' => $uuid,
             'business_id' => $actor->business_id,
             'outlet_id' => $device->outlet_id,
             'device_id' => $device->id,
-            'shift_id' => $this->shiftId($payload['shift_uuid'] ?? null, $device),
+            'shift_id' => $shift?->id,
             'user_id' => $actor->id,
             'order_number' => $this->orderNumber($payload, $actor->business_id, $device),
             'status' => $this->orderStatus($payload['status'] ?? Order::STATUS_DRAFT),
@@ -133,6 +138,10 @@ class SyncEventApplier
             'version' => (int) $order->version,
             'created_at' => $order->created_at ?? now(),
         ]);
+
+        if ($shift) {
+            $this->shifts->markTransactionParticipant($shift, $device, $actor);
+        }
 
         return $this->result('accepted', $order->uuid);
     }
@@ -304,7 +313,17 @@ class SyncEventApplier
         $order->loadMissing(['outlet', 'shift']);
         $this->receipts->registerExisting($receiptNumber, $order->outlet, (string) $device->terminal_code);
 
-        $shiftId = $this->shiftId($payload['shift_uuid'] ?? $order->shift?->uuid, $device) ?? $order->shift_id;
+        $shiftId = $this->resolveTransactionShift(
+            $payload['shift_uuid'] ?? $order->shift?->uuid,
+            $device,
+        )?->id ?? $order->shift_id;
+
+        if ($shiftId) {
+            $shift = Shift::query()->find($shiftId);
+            if ($shift) {
+                $this->shifts->markTransactionParticipant($shift, $device, $actor);
+            }
+        }
 
         $sale = Sale::create([
             'uuid' => $saleUuid,
@@ -423,6 +442,23 @@ class SyncEventApplier
             return $this->result('duplicate', $existing->uuid);
         }
 
+        Outlet::query()->whereKey($device->outlet_id)->lockForUpdate()->first();
+
+        $active = Shift::query()
+            ->where('business_id', $actor->business_id)
+            ->where('outlet_id', $device->outlet_id)
+            ->whereIn('status', [Shift::STATUS_OPEN, Shift::STATUS_CLOSING])
+            ->lockForUpdate()
+            ->first();
+
+        if ($active) {
+            throw ApiException::conflict(
+                'SHIFT_ALREADY_OPEN',
+                'Outlet ini masih memiliki shift aktif. Event shift.opened dari perangkat lain tidak dapat membuat shift kedua.',
+                ['shift_uuid' => $active->uuid, 'status' => $active->status],
+            );
+        }
+
         $shift = Shift::create([
             'uuid' => $uuid,
             'business_id' => $actor->business_id,
@@ -430,11 +466,15 @@ class SyncEventApplier
             'user_id' => $actor->id,
             'device_id' => $device->id,
             'status' => Shift::STATUS_OPEN,
+            'open_slot' => 1,
+            'close_epoch' => 0,
             'opening_cash' => (int) ($payload['opening_cash'] ?? 0),
             'expected_cash' => (int) ($payload['opening_cash'] ?? 0),
             'opening_notes' => $payload['opening_notes'] ?? null,
             'opened_at' => $this->date($payload['opened_at'] ?? null) ?? now(),
         ]);
+
+        $this->shifts->registerParticipant($shift, $device, $actor, true);
 
         return $this->result('accepted', $shift->uuid);
     }
@@ -448,8 +488,12 @@ class SyncEventApplier
             return $this->result('duplicate', $uuid);
         }
 
-        if ($shift->status !== Shift::STATUS_OPEN) {
-            throw ApiException::conflict('SHIFT_NOT_OPEN', 'Kas hanya dapat dicatat pada shift terbuka.');
+        if (! in_array($shift->status, [Shift::STATUS_OPEN, Shift::STATUS_CLOSING], true)) {
+            throw ApiException::conflict(
+                'SHIFT_CLOSED_LATE_EVENT',
+                'Kas masuk/keluar datang setelah shift ditutup. Event disimpan sebagai konflik untuk direkonsiliasi.',
+                ['shift_uuid' => $shift->uuid, 'status' => $shift->status],
+            );
         }
 
         $type = (string) ($payload['type'] ?? '');
@@ -463,8 +507,11 @@ class SyncEventApplier
             'amount' => (int) ($payload['amount'] ?? 0),
             'reason' => $payload['reason'] ?? null,
             'created_by' => $actor->id,
+            'device_id' => $device->id,
             'occurred_at' => $this->date($payload['occurred_at'] ?? null) ?? now(),
         ]);
+
+        $this->shifts->markTransactionParticipant($shift, $device, $actor);
 
         $totals = $this->shiftSummary->calculate($shift);
         $shift->forceFill([
@@ -479,89 +526,43 @@ class SyncEventApplier
     private function closeShift(array $payload, User $actor, Device $device): array
     {
         $shift = $this->findShift($payload, $actor, $device);
+        $actualCash = (int) ($payload['actual_cash'] ?? 0);
 
-        if ($shift->closingSnapshot()->exists()) {
+        if ($shift->status === Shift::STATUS_CLOSED_CONFIRMED || $shift->status === Shift::STATUS_CLOSED_SYNC_EXCEPTION) {
             $snapshot = $shift->closingSnapshot;
-            if ((int) $snapshot->actual_cash === (int) ($payload['actual_cash'] ?? 0)) {
+            if ($snapshot && (int) $snapshot->actual_cash === $actualCash) {
                 return $this->result('duplicate', $shift->uuid);
             }
 
-            throw ApiException::conflict('SHIFT_ALREADY_CLOSED', 'Closing snapshot shift sudah ada dan tidak dapat diubah.');
+            throw ApiException::conflict(
+                'SHIFT_ALREADY_CLOSED',
+                'Closing snapshot shift sudah immutable dan tidak dapat diubah oleh event shift.closed yang terlambat.',
+                ['shift_uuid' => $shift->uuid, 'status' => $shift->status],
+            );
+        }
+
+        if ($shift->status === Shift::STATUS_CLOSING) {
+            return $this->result('duplicate', $shift->uuid);
         }
 
         if ($shift->status !== Shift::STATUS_OPEN) {
-            throw ApiException::conflict('SHIFT_NOT_OPEN', 'Shift tidak dalam status terbuka.');
+            throw ApiException::conflict('SHIFT_NOT_OPEN', 'Shift tidak dalam status terbuka.', [
+                'shift_uuid' => $shift->uuid,
+                'status' => $shift->status,
+            ]);
         }
 
-        $opening = (int) ($payload['opening_cash'] ?? $shift->opening_cash);
-        $tendered = (int) ($payload['cash_tendered'] ?? 0);
-        $change = (int) ($payload['cash_change'] ?? 0);
-        $cashIn = (int) ($payload['cash_in'] ?? 0);
-        $cashOut = (int) ($payload['cash_out'] ?? 0);
-        $cashRefund = (int) ($payload['cash_refund'] ?? 0);
-        $expected = (int) ($payload['expected_cash'] ?? 0);
-        $actual = (int) ($payload['actual_cash'] ?? 0);
-        $variance = (int) ($payload['variance'] ?? ($actual - $expected));
-
-        if ($expected !== $opening + $tendered - $change + $cashIn - $cashOut - $cashRefund) {
-            throw ApiException::conflict('SHIFT_EXPECTED_CASH_INVALID', 'Komponen expected cash pada snapshot tidak konsisten.');
-        }
-        if ($variance !== $actual - $expected) {
-            throw ApiException::conflict('SHIFT_VARIANCE_INVALID', 'Nilai variance tidak sesuai actual minus expected.');
+        if (! isset($payload['actual_cash'])) {
+            throw new ApiException('SHIFT_ACTUAL_CASH_REQUIRED', 'Nominal kas aktual wajib dikirim untuk menutup shift.', 422);
         }
 
-        $pendingSyncCount = (int) ($payload['pending_sync_count'] ?? 1);
-        $closedAt = $this->date($payload['closed_at'] ?? null) ?? now();
-        if ($closedAt->lt($shift->opened_at)) {
-            throw new ApiException('SHIFT_CLOSED_AT_INVALID', 'Waktu tutup shift tidak valid.', 422);
-        }
-
-        $status = $pendingSyncCount > 0
-            ? Shift::STATUS_CLOSED_PENDING_SYNC
-            : Shift::STATUS_CLOSED_CONFIRMED;
-
-        $shift->closingSnapshot()->create([
-            'business_id' => $shift->business_id,
-            'outlet_id' => $shift->outlet_id,
-            'user_id' => $shift->user_id,
-            'device_id' => $shift->device_id,
-            'opening_cash' => $opening,
-            'cash_tendered' => $tendered,
-            'cash_change' => $change,
-            'cash_in' => $cashIn,
-            'cash_out' => $cashOut,
-            'cash_refund' => $cashRefund,
-            'expected_cash' => $expected,
-            'actual_cash' => $actual,
-            'variance' => $variance,
-            'confirmed_noncash' => (int) ($payload['confirmed_noncash'] ?? 0),
-            'awaiting_verification_amount' => (int) ($payload['awaiting_verification_amount'] ?? 0),
-            'local_transaction_count' => (int) ($payload['local_transaction_count'] ?? 0),
-            'pending_sync_count' => $pendingSyncCount,
-            'local_event_sequence' => $payload['local_event_sequence'] ?? null,
+        app(CloseShift::class)->handle($shift, [
+            'actual_cash' => $actualCash,
             'closing_notes' => $payload['closing_notes'] ?? null,
-            'snapshot' => $payload,
-            'closed_at' => $closedAt,
-        ]);
-
-        $shift->forceFill([
-            'status' => $status,
-            'cash_tendered' => $tendered,
-            'cash_change' => $change,
-            'cash_in' => $cashIn,
-            'cash_out' => $cashOut,
-            'cash_refund' => $cashRefund,
-            'expected_cash' => $expected,
-            'actual_cash' => $actual,
-            'variance' => $variance,
-            'confirmed_noncash' => (int) ($payload['confirmed_noncash'] ?? 0),
-            'awaiting_verification_amount' => (int) ($payload['awaiting_verification_amount'] ?? 0),
-            'local_transaction_count' => (int) ($payload['local_transaction_count'] ?? 0),
-            'pending_sync_count' => $pendingSyncCount,
-            'local_event_sequence' => $payload['local_event_sequence'] ?? null,
-            'closing_notes' => $payload['closing_notes'] ?? null,
-            'closed_at' => $closedAt,
-        ])->save();
+            'pending_sync_count' => (int) ($payload['pending_sync_count'] ?? 0),
+            'local_event_sequence' => isset($payload['local_event_sequence']) ? (int) $payload['local_event_sequence'] : null,
+            'closed_at' => $payload['closed_at'] ?? null,
+        ], $actor, $device);
 
         return $this->result('accepted', $shift->uuid);
     }
@@ -612,9 +613,13 @@ class SyncEventApplier
             throw new ApiException('CASH_TENDERED_INSUFFICIENT', 'Uang tunai diterima kurang dari nominal pembayaran.', 422);
         }
 
-        $status = $isCash && ! $forceAwaiting
+        $confirmed = ($isCash && ! $forceAwaiting) || (! $isCash && $actor->isOwner());
+        $status = $confirmed
             ? SalePayment::STATUS_CONFIRMED
             : SalePayment::STATUS_AWAITING_VERIFICATION;
+        $proofRequired = ! $isCash
+            && ! $actor->isOwner()
+            && (bool) $sale->business?->non_cash_proof_required;
         $occurredAt = $this->date($payload['recorded_at'] ?? null) ?? now();
 
         return $sale->payments()->create([
@@ -628,6 +633,7 @@ class SyncEventApplier
             'status' => $status,
             'provider_reference' => $payload['provider_reference'] ?? null,
             'notes' => $payload['notes'] ?? null,
+            'proof_required' => $proofRequired,
             'origin' => 'offline',
             'recorded_by' => $actor->id,
             'recorded_at' => $occurredAt,
@@ -792,12 +798,13 @@ class SyncEventApplier
             ->where('uuid', $uuid)
             ->where('business_id', $actor->business_id)
             ->where('outlet_id', $device->outlet_id)
+            ->lockForUpdate()
             ->first();
 
         if (! $shift) {
             throw ApiException::blocked(
                 'SYNC_DEPENDENCY_SHIFT_MISSING',
-                'Shift referensi belum tersedia. Kirim event shift.opened terlebih dahulu.',
+                'Shift outlet belum tersedia di server. Pastikan shift dibuka Owner dan sudah tersinkron; event shift.opened lokal dari perangkat kasir tidak diperlukan.',
                 ['shift_uuid' => $uuid],
             );
         }
@@ -805,27 +812,56 @@ class SyncEventApplier
         return $shift;
     }
 
-    private function shiftId(?string $uuid, Device $device): ?int
+    /**
+     * Resolves the shared outlet shift for a transaction event. When an older
+     * client omits shift_uuid, the active outlet shift is used so historical
+     * payloads keep working without creating per-device shifts.
+     */
+    private function resolveTransactionShift(?string $uuid, Device $device): ?Shift
     {
-        if (! $uuid) {
-            return null;
+        if ($uuid !== null && trim($uuid) !== '') {
+            $shift = Shift::query()
+                ->where('uuid', strtolower(trim($uuid)))
+                ->where('business_id', $device->business_id)
+                ->where('outlet_id', $device->outlet_id)
+                ->lockForUpdate()
+                ->first();
+
+            if (! $shift) {
+                throw ApiException::blocked(
+                    'SYNC_DEPENDENCY_SHIFT_MISSING',
+                    'Shift referensi belum tersedia pada outlet perangkat ini.',
+                    ['shift_uuid' => $uuid],
+                );
+            }
+
+            if (! in_array($shift->status, [Shift::STATUS_OPEN, Shift::STATUS_CLOSING], true)) {
+                throw ApiException::conflict(
+                    'SHIFT_CLOSED_LATE_EVENT',
+                    'Event transaksi datang setelah shift ditutup. Event disimpan sebagai konflik dan tidak mengubah snapshot penutupan.',
+                    ['shift_uuid' => $shift->uuid, 'status' => $shift->status],
+                );
+            }
+
+            return $shift;
         }
 
-        $shift = Shift::query()
-            ->where('uuid', $uuid)
+        $active = Shift::query()
             ->where('business_id', $device->business_id)
             ->where('outlet_id', $device->outlet_id)
+            ->whereIn('status', [Shift::STATUS_OPEN, Shift::STATUS_CLOSING])
+            ->lockForUpdate()
+            ->latest('opened_at')
             ->first();
 
-        if (! $shift) {
+        if (! $active) {
             throw ApiException::blocked(
-                'SYNC_DEPENDENCY_SHIFT_MISSING',
-                'Shift referensi belum tersedia pada perangkat ini.',
-                ['shift_uuid' => $uuid],
+                'SHIFT_REQUIRED',
+                'Shift outlet belum aktif. Minta Owner membuka shift sebelum transaksi disinkronkan.',
             );
         }
 
-        return $shift->id;
+        return $active;
     }
 
     private function orderNumber(array $payload, int $businessId, Device $device): string

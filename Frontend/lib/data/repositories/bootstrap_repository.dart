@@ -182,25 +182,56 @@ class BootstrapRepository {
 
       final openShift = data.openShift;
       if (openShift != null && openShift.uuid.isNotEmpty) {
-        final existing = await (_db.select(
-          _db.localShifts,
-        )..where((row) => row.uuid.equals(openShift.uuid))).getSingleOrNull();
-        if (existing == null) {
-          await _db
-              .into(_db.localShifts)
-              .insert(
-                LocalShiftsCompanion.insert(
-                  uuid: openShift.uuid,
-                  status: Value(openShift.status),
-                  openingCash: Value(openShift.openingCash),
-                  openingNotes: Value(openShift.notes),
-                  openedAt: openShift.openedAt ?? now,
-                  expectedCash: Value(openShift.expectedCash),
-                  synced: const Value(true),
+        // The server shift always wins over a stale local copy. Existing cash
+        // movements and sales keep their own shift UUID.
+        await _db
+            .into(_db.localShifts)
+            .insertOnConflictUpdate(
+              LocalShiftsCompanion(
+                uuid: Value(openShift.uuid),
+                status: Value(openShift.status),
+                openingCash: Value(openShift.openingCash),
+                openingNotes: Value(openShift.notes),
+                openedAt: Value(openShift.openedAt ?? now),
+                expectedCash: Value(openShift.expectedCash),
+                synced: const Value(true),
+                closeEpoch: Value(openShift.closeEpoch),
+                isClosing: Value(
+                  openShift.isClosing || openShift.status == 'closing',
                 ),
-                mode: InsertMode.insertOrIgnore,
-              );
-        }
+                openedByName: Value(openShift.openedByName),
+                openedDeviceName: Value(openShift.openedDeviceName),
+                canFinalize: Value(openShift.canFinalize),
+                pendingDevicesJson: Value(
+                  jsonEncode(
+                    openShift.pendingDevices
+                        .map((device) => device.toJson())
+                        .toList(),
+                  ),
+                ),
+                serverSummaryJson: Value(
+                  openShift.serverSummary == null
+                      ? null
+                      : jsonEncode(openShift.serverSummary!.toJson()),
+                ),
+              ),
+            );
+      } else {
+        // No active outlet shift on the server. A synced local shift must not
+        // keep accepting transactions; an unsynced one stays until pushed.
+        await (_db.update(_db.localShifts)..where(
+              (row) =>
+                  row.status.isIn(const ['open', 'closing']) &
+                  row.synced.equals(true),
+            ))
+            .write(
+              const LocalShiftsCompanion(
+                status: Value('closed_remote'),
+                isClosing: Value(false),
+                canFinalize: Value(false),
+                pendingDevicesJson: Value('[]'),
+              ),
+            );
       }
     });
   }

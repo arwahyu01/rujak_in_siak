@@ -178,6 +178,25 @@ class SalePayments extends Table {
   DateTimeColumn get confirmedAt => dateTime().nullable()();
 }
 
+@TableIndex(
+  name: 'payment_proof_uploads_status',
+  columns: {#status, #nextAttemptAt},
+)
+class PaymentProofUploads extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get saleUuid => text()();
+  TextColumn get paymentUuid => text().unique()();
+  TextColumn get idempotencyKey => text().nullable()();
+  TextColumn get localPath => text().nullable()();
+  TextColumn get status => text().withDefault(const Constant('pending'))();
+  IntColumn get attempts => integer().withDefault(const Constant(0))();
+  TextColumn get lastError => text().nullable()();
+  DateTimeColumn get nextAttemptAt => dateTime().nullable()();
+  DateTimeColumn get uploadedAt => dateTime().nullable()();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+}
+
 @TableIndex(name: 'outbox_status_sequence', columns: {#status, #sequence})
 class OutboxEvents extends Table {
   IntColumn get id => integer().autoIncrement()();
@@ -210,6 +229,17 @@ class LocalShifts extends Table {
   IntColumn get difference => integer().nullable()();
   TextColumn get closingNotes => text().nullable()();
   BoolColumn get synced => boolean().withDefault(const Constant(false))();
+  IntColumn get closeEpoch => integer().withDefault(const Constant(0))();
+  BoolColumn get isClosing => boolean().withDefault(const Constant(false))();
+  TextColumn get openedByName => text().nullable()();
+  TextColumn get openedDeviceName => text().nullable()();
+  IntColumn get closeActualCash => integer().nullable()();
+  TextColumn get closedByName => text().nullable()();
+  TextColumn get closedDeviceName => text().nullable()();
+  BoolColumn get canFinalize => boolean().withDefault(const Constant(false))();
+  TextColumn get pendingDevicesJson =>
+      text().withDefault(const Constant('[]'))();
+  TextColumn get serverSummaryJson => text().nullable()();
 
   @override
   Set<Column> get primaryKey => {uuid};
